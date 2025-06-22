@@ -78,9 +78,11 @@ type ConfigInfo struct {
 				Context float32 `json:"context"`
 				Output  float32 `json:"output"`
 			} `json:"limit,omitempty"`
-			Name        *string `json:"name,omitempty"`
-			Reasoning   *bool   `json:"reasoning,omitempty"`
-			Temperature *bool   `json:"temperature,omitempty"`
+			Name        *string                 `json:"name,omitempty"`
+			Options     *map[string]interface{} `json:"options,omitempty"`
+			Reasoning   *bool                   `json:"reasoning,omitempty"`
+			Temperature *bool                   `json:"temperature,omitempty"`
+			ToolCall    *bool                   `json:"tool_call,omitempty"`
 		} `json:"models"`
 		Name    *string                 `json:"name,omitempty"`
 		Npm     *string                 `json:"npm,omitempty"`
@@ -435,9 +437,11 @@ type ModelInfo struct {
 		Context float32 `json:"context"`
 		Output  float32 `json:"output"`
 	} `json:"limit"`
-	Name        string `json:"name"`
-	Reasoning   bool   `json:"reasoning"`
-	Temperature bool   `json:"temperature"`
+	Name        string                 `json:"name"`
+	Options     map[string]interface{} `json:"options"`
+	Reasoning   bool                   `json:"reasoning"`
+	Temperature bool                   `json:"temperature"`
+	ToolCall    bool                   `json:"tool_call"`
 }
 
 // ProviderInfo defines model for Provider.Info.
@@ -511,6 +515,12 @@ type PostSessionChatJSONBody struct {
 	SessionID  string        `json:"sessionID"`
 }
 
+// PostSessionGenerateTitleJSONBody defines parameters for PostSessionGenerateTitle.
+type PostSessionGenerateTitleJSONBody struct {
+	ProviderID string `json:"providerID"`
+	Text       string `json:"text"`
+}
+
 // PostSessionInitializeJSONBody defines parameters for PostSessionInitialize.
 type PostSessionInitializeJSONBody struct {
 	ModelID    string `json:"modelID"`
@@ -535,6 +545,11 @@ type PostSessionSummarizeJSONBody struct {
 	SessionID  string `json:"sessionID"`
 }
 
+// PostSessionUnshareJSONBody defines parameters for PostSessionUnshare.
+type PostSessionUnshareJSONBody struct {
+	SessionID string `json:"sessionID"`
+}
+
 // PostFileSearchJSONRequestBody defines body for PostFileSearch for application/json ContentType.
 type PostFileSearchJSONRequestBody PostFileSearchJSONBody
 
@@ -543,6 +558,9 @@ type PostSessionAbortJSONRequestBody PostSessionAbortJSONBody
 
 // PostSessionChatJSONRequestBody defines body for PostSessionChat for application/json ContentType.
 type PostSessionChatJSONRequestBody PostSessionChatJSONBody
+
+// PostSessionGenerateTitleJSONRequestBody defines body for PostSessionGenerateTitle for application/json ContentType.
+type PostSessionGenerateTitleJSONRequestBody PostSessionGenerateTitleJSONBody
 
 // PostSessionInitializeJSONRequestBody defines body for PostSessionInitialize for application/json ContentType.
 type PostSessionInitializeJSONRequestBody PostSessionInitializeJSONBody
@@ -555,6 +573,9 @@ type PostSessionShareJSONRequestBody PostSessionShareJSONBody
 
 // PostSessionSummarizeJSONRequestBody defines body for PostSessionSummarize for application/json ContentType.
 type PostSessionSummarizeJSONRequestBody PostSessionSummarizeJSONBody
+
+// PostSessionUnshareJSONRequestBody defines body for PostSessionUnshare for application/json ContentType.
+type PostSessionUnshareJSONRequestBody PostSessionUnshareJSONBody
 
 // Getter for additional properties for MessageInfo_Metadata_Tool_AdditionalProperties. Returns the specified
 // element and whether it was found
@@ -1611,6 +1632,11 @@ type ClientInterface interface {
 	// PostSessionCreate request
 	PostSessionCreate(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PostSessionGenerateTitleWithBody request with any body
+	PostSessionGenerateTitleWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostSessionGenerateTitle(ctx context.Context, body PostSessionGenerateTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PostSessionInitializeWithBody request with any body
 	PostSessionInitializeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1633,6 +1659,11 @@ type ClientInterface interface {
 	PostSessionSummarizeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	PostSessionSummarize(ctx context.Context, body PostSessionSummarizeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostSessionUnshareWithBody request with any body
+	PostSessionUnshareWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostSessionUnshare(ctx context.Context, body PostSessionUnshareJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) PostAppInfo(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -1803,6 +1834,30 @@ func (c *Client) PostSessionCreate(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
+func (c *Client) PostSessionGenerateTitleWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSessionGenerateTitleRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostSessionGenerateTitle(ctx context.Context, body PostSessionGenerateTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSessionGenerateTitleRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) PostSessionInitializeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPostSessionInitializeRequestWithBody(c.Server, contentType, body)
 	if err != nil {
@@ -1901,6 +1956,30 @@ func (c *Client) PostSessionSummarizeWithBody(ctx context.Context, contentType s
 
 func (c *Client) PostSessionSummarize(ctx context.Context, body PostSessionSummarizeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPostSessionSummarizeRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostSessionUnshareWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSessionUnshareRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostSessionUnshare(ctx context.Context, body PostSessionUnshareJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSessionUnshareRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2247,6 +2326,46 @@ func NewPostSessionCreateRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewPostSessionGenerateTitleRequest calls the generic PostSessionGenerateTitle builder with application/json body
+func NewPostSessionGenerateTitleRequest(server string, body PostSessionGenerateTitleJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostSessionGenerateTitleRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostSessionGenerateTitleRequestWithBody generates requests for PostSessionGenerateTitle with any type of body
+func NewPostSessionGenerateTitleRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/session_generate_title")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewPostSessionInitializeRequest calls the generic PostSessionInitialize builder with application/json body
 func NewPostSessionInitializeRequest(server string, body PostSessionInitializeJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2434,6 +2553,46 @@ func NewPostSessionSummarizeRequestWithBody(server string, contentType string, b
 	return req, nil
 }
 
+// NewPostSessionUnshareRequest calls the generic PostSessionUnshare builder with application/json body
+func NewPostSessionUnshareRequest(server string, body PostSessionUnshareJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostSessionUnshareRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostSessionUnshareRequestWithBody generates requests for PostSessionUnshare with any type of body
+func NewPostSessionUnshareRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/session_unshare")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -2516,6 +2675,11 @@ type ClientWithResponsesInterface interface {
 	// PostSessionCreateWithResponse request
 	PostSessionCreateWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*PostSessionCreateResponse, error)
 
+	// PostSessionGenerateTitleWithBodyWithResponse request with any body
+	PostSessionGenerateTitleWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionGenerateTitleResponse, error)
+
+	PostSessionGenerateTitleWithResponse(ctx context.Context, body PostSessionGenerateTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSessionGenerateTitleResponse, error)
+
 	// PostSessionInitializeWithBodyWithResponse request with any body
 	PostSessionInitializeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionInitializeResponse, error)
 
@@ -2538,6 +2702,11 @@ type ClientWithResponsesInterface interface {
 	PostSessionSummarizeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionSummarizeResponse, error)
 
 	PostSessionSummarizeWithResponse(ctx context.Context, body PostSessionSummarizeJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSessionSummarizeResponse, error)
+
+	// PostSessionUnshareWithBodyWithResponse request with any body
+	PostSessionUnshareWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionUnshareResponse, error)
+
+	PostSessionUnshareWithResponse(ctx context.Context, body PostSessionUnshareJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSessionUnshareResponse, error)
 }
 
 type PostAppInfoResponse struct {
@@ -2791,6 +2960,30 @@ func (r PostSessionCreateResponse) StatusCode() int {
 	return 0
 }
 
+type PostSessionGenerateTitleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Title string `json:"title"`
+	}
+}
+
+// Status returns HTTPResponse.Status
+func (r PostSessionGenerateTitleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostSessionGenerateTitleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type PostSessionInitializeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -2895,6 +3088,28 @@ func (r PostSessionSummarizeResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r PostSessionSummarizeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type PostSessionUnshareResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SessionInfo
+}
+
+// Status returns HTTPResponse.Status
+func (r PostSessionUnshareResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostSessionUnshareResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -3024,6 +3239,23 @@ func (c *ClientWithResponses) PostSessionCreateWithResponse(ctx context.Context,
 	return ParsePostSessionCreateResponse(rsp)
 }
 
+// PostSessionGenerateTitleWithBodyWithResponse request with arbitrary body returning *PostSessionGenerateTitleResponse
+func (c *ClientWithResponses) PostSessionGenerateTitleWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionGenerateTitleResponse, error) {
+	rsp, err := c.PostSessionGenerateTitleWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostSessionGenerateTitleResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostSessionGenerateTitleWithResponse(ctx context.Context, body PostSessionGenerateTitleJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSessionGenerateTitleResponse, error) {
+	rsp, err := c.PostSessionGenerateTitle(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostSessionGenerateTitleResponse(rsp)
+}
+
 // PostSessionInitializeWithBodyWithResponse request with arbitrary body returning *PostSessionInitializeResponse
 func (c *ClientWithResponses) PostSessionInitializeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionInitializeResponse, error) {
 	rsp, err := c.PostSessionInitializeWithBody(ctx, contentType, body, reqEditors...)
@@ -3099,6 +3331,23 @@ func (c *ClientWithResponses) PostSessionSummarizeWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParsePostSessionSummarizeResponse(rsp)
+}
+
+// PostSessionUnshareWithBodyWithResponse request with arbitrary body returning *PostSessionUnshareResponse
+func (c *ClientWithResponses) PostSessionUnshareWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionUnshareResponse, error) {
+	rsp, err := c.PostSessionUnshareWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostSessionUnshareResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostSessionUnshareWithResponse(ctx context.Context, body PostSessionUnshareJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSessionUnshareResponse, error) {
+	rsp, err := c.PostSessionUnshare(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostSessionUnshareResponse(rsp)
 }
 
 // ParsePostAppInfoResponse parses an HTTP response from a PostAppInfoWithResponse call
@@ -3402,6 +3651,34 @@ func ParsePostSessionCreateResponse(rsp *http.Response) (*PostSessionCreateRespo
 	return response, nil
 }
 
+// ParsePostSessionGenerateTitleResponse parses an HTTP response from a PostSessionGenerateTitleWithResponse call
+func ParsePostSessionGenerateTitleResponse(rsp *http.Response) (*PostSessionGenerateTitleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostSessionGenerateTitleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParsePostSessionInitializeResponse parses an HTTP response from a PostSessionInitializeWithResponse call
 func ParsePostSessionInitializeResponse(rsp *http.Response) (*PostSessionInitializeResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -3522,6 +3799,32 @@ func ParsePostSessionSummarizeResponse(rsp *http.Response) (*PostSessionSummariz
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest bool
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostSessionUnshareResponse parses an HTTP response from a PostSessionUnshareWithResponse call
+func ParsePostSessionUnshareResponse(rsp *http.Response) (*PostSessionUnshareResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostSessionUnshareResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SessionInfo
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

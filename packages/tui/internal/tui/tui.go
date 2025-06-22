@@ -40,6 +40,26 @@ type appModel struct {
 	leaderBinding        *key.Binding
 	isLeaderSequence     bool
 	toastManager         *toast.ToastManager
+	lastSubmittedMessage string
+	wasProcessing        bool
+}
+
+func formatWindowTitle(message string) string {
+	if message == "" {
+		return "opencode"
+	}
+
+	// Take first line only
+	lines := strings.Split(message, "\n")
+	title := strings.TrimSpace(lines[0])
+
+	// Truncate if too long
+	maxLen := 50
+	if len(title) > maxLen {
+		title = title[:maxLen-3] + "..."
+	}
+
+	return "opencode: " + title
 }
 
 func (a appModel) Init() tea.Cmd {
@@ -55,6 +75,9 @@ func (a appModel) Init() tea.Cmd {
 	cmds = append(cmds, a.status.Init())
 	cmds = append(cmds, a.completions.Init())
 	cmds = append(cmds, a.toastManager.Init())
+
+	// Set initial window title
+	cmds = append(cmds, tea.SetWindowTitle("opencode"))
 
 	// Check if we should show the init dialog
 	cmds = append(cmds, func() tea.Msg {
@@ -214,8 +237,23 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case app.SendMsg:
 		a.showCompletionDialog = false
+		a.lastSubmittedMessage = msg.Text
 		cmd := a.app.SendChatMessage(context.Background(), msg.Text, msg.Attachments)
 		cmds = append(cmds, cmd)
+		
+		// Generate title asynchronously
+		cmds = append(cmds, func() tea.Msg {
+			title, err := a.app.GenerateWindowTitle(context.Background(), msg.Text)
+			if err != nil {
+				slog.Debug("Failed to generate window title", "error", err)
+				// Fall back to truncated message
+				title = formatWindowTitle(msg.Text)
+			} else {
+				// Prepend "opencode: " to AI-generated title
+				title = "opencode: " + title
+			}
+			return app.WindowTitleMsg{Title: title}
+		})
 	case dialog.CompletionDialogCloseMsg:
 		a.showCompletionDialog = false
 	case client.EventInstallationUpdated:
@@ -267,6 +305,10 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.app.Session = msg
 		a.app.Messages = messages
+		a.lastSubmittedMessage = ""
+		cmds = append(cmds, tea.SetWindowTitle("opencode"))
+	case app.WindowTitleMsg:
+		return a, tea.SetWindowTitle(msg.Title)
 	case app.ModelSelectedMsg:
 		a.app.Provider = &msg.Provider
 		a.app.Model = &msg.Model
@@ -313,6 +355,14 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.completions = u.(dialog.CompletionDialog)
 		cmds = append(cmds, cmd)
 	}
+
+	// Check if AI finished processing and reset title
+	isProcessing := a.app.IsBusy()
+	if a.wasProcessing && !isProcessing && a.lastSubmittedMessage != "" {
+		a.lastSubmittedMessage = ""
+		cmds = append(cmds, tea.SetWindowTitle("opencode"))
+	}
+	a.wasProcessing = isProcessing
 
 	return a, tea.Batch(cmds...)
 }
@@ -421,7 +471,9 @@ func (a appModel) executeCommand(command commands.Command) (tea.Model, tea.Cmd) 
 		}
 		a.app.Session = &client.SessionInfo{}
 		a.app.Messages = []client.MessageInfo{}
+		a.lastSubmittedMessage = ""
 		cmds = append(cmds, util.CmdHandler(app.SessionClearedMsg{}))
+		cmds = append(cmds, tea.SetWindowTitle("opencode"))
 	case commands.SessionListCommand:
 		sessionDialog := dialog.NewSessionDialog(a.app)
 		a.modal = sessionDialog
@@ -449,7 +501,8 @@ func (a appModel) executeCommand(command commands.Command) (tea.Model, tea.Cmd) 
 			return a, nil
 		}
 		a.app.Cancel(context.Background(), a.app.Session.Id)
-		return a, nil
+		a.lastSubmittedMessage = ""
+		return a, tea.SetWindowTitle("opencode")
 	case commands.SessionCompactCommand:
 		if a.app.Session.Id == "" {
 			return a, nil

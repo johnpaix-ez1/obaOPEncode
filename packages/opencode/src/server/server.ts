@@ -450,6 +450,36 @@ export namespace Server {
         },
       )
       .post(
+        "/session_generate_title",
+        describeRoute({
+          description: "Generate a concise title for a message",
+          responses: {
+            200: {
+              description: "Generated title",
+              content: {
+                "application/json": {
+                  schema: resolver(z.object({
+                    title: z.string(),
+                  })),
+                },
+              },
+            },
+          },
+        }),
+        zValidator(
+          "json",
+          z.object({
+            text: z.string(),
+            providerID: z.string(),
+          }),
+        ),
+        async (c) => {
+          const body = c.req.valid("json")
+          const title = await Session.generateTitle(body.text, body.providerID)
+          return c.json({ title })
+        },
+      )
+      .post(
         "/provider_list",
         describeRoute({
           description: "List all providers",

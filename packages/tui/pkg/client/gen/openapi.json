@@ -230,6 +230,42 @@
         }
       }
     },
+    "/session_unshare": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Successfully unshared session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/session.info"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postSession_unshare",
+        "parameters": [],
+        "description": "Unshare the session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionID": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sessionID"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/session_messages": {
       "post": {
         "responses": {
@@ -415,6 +451,54 @@
                   "providerID",
                   "modelID",
                   "parts"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session_generate_title": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Generated title",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postSession_generate_title",
+        "parameters": [],
+        "description": "Generate a concise title for a message",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "providerID": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "providerID"
                 ]
               }
             }
@@ -1461,6 +1545,9 @@
                       "temperature": {
                         "type": "boolean"
                       },
+                      "tool_call": {
+                        "type": "boolean"
+                      },
                       "cost": {
                         "type": "object",
                         "properties": {
@@ -1499,6 +1586,10 @@
                       },
                       "id": {
                         "type": "string"
+                      },
+                      "options": {
+                        "type": "object",
+                        "additionalProperties": {}
                       }
                     }
                   }
@@ -1535,7 +1626,8 @@
             },
             "description": "MCP (Model Context Protocol) server configurations"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "Config.Keybinds": {
         "type": "object",
@@ -1648,7 +1740,8 @@
             "type": "string",
             "description": "Exit the application"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "Provider.Info": {
         "type": "object",
@@ -1700,6 +1793,9 @@
           "temperature": {
             "type": "boolean"
           },
+          "tool_call": {
+            "type": "boolean"
+          },
           "cost": {
             "type": "object",
             "properties": {
@@ -1738,6 +1834,10 @@
           },
           "id": {
             "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": {}
           }
         },
         "required": [
@@ -1745,9 +1845,11 @@
           "attachment",
           "reasoning",
           "temperature",
+          "tool_call",
           "cost",
           "limit",
-          "id"
+          "id",
+          "options"
         ]
       },
       "Config.McpLocal": {
@@ -1776,7 +1878,8 @@
         "required": [
           "type",
           "command"
-        ]
+        ],
+        "additionalProperties": false
       },
       "Config.McpRemote": {
         "type": "object",
@@ -1794,7 +1897,8 @@
         "required": [
           "type",
           "url"
-        ]
+        ],
+        "additionalProperties": false
       },
       "Error": {
         "type": "object",

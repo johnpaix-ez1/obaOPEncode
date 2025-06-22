@@ -224,6 +224,64 @@ export namespace Session {
     })
   }
 
+  export async function generateTitle(userMessage: string, providerID: string): Promise<string> {
+    const log = Log.create({ service: "title-generator" })
+    const fallback = userMessage.split('\n')[0].slice(0, 40) + (userMessage.length > 40 ? '...' : '')
+    try {
+      let titleModelID: string | undefined
+      let titleProviderID: string | undefined
+      switch (providerID) {
+        case "anthropic":
+          titleModelID = "claude-3-5-haiku-20241022"
+          titleProviderID = "anthropic"
+          break
+        case "openai":
+          titleModelID = "gpt-4o-mini"
+          titleProviderID = "openai"
+          break
+        default:
+      }
+
+      if (!titleModelID || !titleProviderID) {
+        return fallback
+      }
+
+      try {
+        await Provider.getModel(titleProviderID, titleModelID)
+      } catch {
+        return fallback
+      }
+
+      const model = await Provider.getModel(titleProviderID, titleModelID)
+
+      const result = await generateText({
+        model: model.language,
+        messages: [
+          {
+            role: "system",
+            content: SystemPrompt.windowTitle()
+          },
+          {
+            role: "user",
+            content: userMessage
+          }],
+        maxTokens: 20,
+        temperature: 0,
+      })
+
+      const title = result.text?.trim() || fallback
+      
+      // Ensure title is not too long
+      if (title.length > 40) {
+        return title.slice(0, 37) + '...'
+      }
+
+      return title
+    } catch (error) {
+      log.error("Failed to generate title", { error })
+      return fallback
+    }
+  }
   export async function chat(input: {
     sessionID: string
     providerID: string
