@@ -518,6 +518,12 @@ type PostSessionChatJSONBody struct {
 	SessionID  string        `json:"sessionID"`
 }
 
+// PostSessionGenerateVerbJSONBody defines parameters for PostSessionGenerateVerb.
+type PostSessionGenerateVerbJSONBody struct {
+	ProviderID string `json:"providerID"`
+	Text       string `json:"text"`
+}
+
 // PostSessionInitializeJSONBody defines parameters for PostSessionInitialize.
 type PostSessionInitializeJSONBody struct {
 	ModelID    string `json:"modelID"`
@@ -555,6 +561,9 @@ type PostSessionAbortJSONRequestBody PostSessionAbortJSONBody
 
 // PostSessionChatJSONRequestBody defines body for PostSessionChat for application/json ContentType.
 type PostSessionChatJSONRequestBody PostSessionChatJSONBody
+
+// PostSessionGenerateVerbJSONRequestBody defines body for PostSessionGenerateVerb for application/json ContentType.
+type PostSessionGenerateVerbJSONRequestBody PostSessionGenerateVerbJSONBody
 
 // PostSessionInitializeJSONRequestBody defines body for PostSessionInitialize for application/json ContentType.
 type PostSessionInitializeJSONRequestBody PostSessionInitializeJSONBody
@@ -1626,6 +1635,11 @@ type ClientInterface interface {
 	// PostSessionCreate request
 	PostSessionCreate(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PostSessionGenerateVerbWithBody request with any body
+	PostSessionGenerateVerbWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostSessionGenerateVerb(ctx context.Context, body PostSessionGenerateVerbJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PostSessionInitializeWithBody request with any body
 	PostSessionInitializeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1813,6 +1827,30 @@ func (c *Client) PostSessionChat(ctx context.Context, body PostSessionChatJSONRe
 
 func (c *Client) PostSessionCreate(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPostSessionCreateRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostSessionGenerateVerbWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSessionGenerateVerbRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostSessionGenerateVerb(ctx context.Context, body PostSessionGenerateVerbJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSessionGenerateVerbRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2291,6 +2329,46 @@ func NewPostSessionCreateRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewPostSessionGenerateVerbRequest calls the generic PostSessionGenerateVerb builder with application/json body
+func NewPostSessionGenerateVerbRequest(server string, body PostSessionGenerateVerbJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostSessionGenerateVerbRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostSessionGenerateVerbRequestWithBody generates requests for PostSessionGenerateVerb with any type of body
+func NewPostSessionGenerateVerbRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/session_generate_verb")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewPostSessionInitializeRequest calls the generic PostSessionInitialize builder with application/json body
 func NewPostSessionInitializeRequest(server string, body PostSessionInitializeJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2600,6 +2678,11 @@ type ClientWithResponsesInterface interface {
 	// PostSessionCreateWithResponse request
 	PostSessionCreateWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*PostSessionCreateResponse, error)
 
+	// PostSessionGenerateVerbWithBodyWithResponse request with any body
+	PostSessionGenerateVerbWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionGenerateVerbResponse, error)
+
+	PostSessionGenerateVerbWithResponse(ctx context.Context, body PostSessionGenerateVerbJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSessionGenerateVerbResponse, error)
+
 	// PostSessionInitializeWithBodyWithResponse request with any body
 	PostSessionInitializeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionInitializeResponse, error)
 
@@ -2880,6 +2963,30 @@ func (r PostSessionCreateResponse) StatusCode() int {
 	return 0
 }
 
+type PostSessionGenerateVerbResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Verb string `json:"verb"`
+	}
+}
+
+// Status returns HTTPResponse.Status
+func (r PostSessionGenerateVerbResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostSessionGenerateVerbResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type PostSessionInitializeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3133,6 +3240,23 @@ func (c *ClientWithResponses) PostSessionCreateWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParsePostSessionCreateResponse(rsp)
+}
+
+// PostSessionGenerateVerbWithBodyWithResponse request with arbitrary body returning *PostSessionGenerateVerbResponse
+func (c *ClientWithResponses) PostSessionGenerateVerbWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSessionGenerateVerbResponse, error) {
+	rsp, err := c.PostSessionGenerateVerbWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostSessionGenerateVerbResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostSessionGenerateVerbWithResponse(ctx context.Context, body PostSessionGenerateVerbJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSessionGenerateVerbResponse, error) {
+	rsp, err := c.PostSessionGenerateVerb(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostSessionGenerateVerbResponse(rsp)
 }
 
 // PostSessionInitializeWithBodyWithResponse request with arbitrary body returning *PostSessionInitializeResponse
@@ -3524,6 +3648,34 @@ func ParsePostSessionCreateResponse(rsp *http.Response) (*PostSessionCreateRespo
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostSessionGenerateVerbResponse parses an HTTP response from a PostSessionGenerateVerbWithResponse call
+func ParsePostSessionGenerateVerbResponse(rsp *http.Response) (*PostSessionGenerateVerbResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostSessionGenerateVerbResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Verb string `json:"verb"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

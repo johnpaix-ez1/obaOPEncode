@@ -450,6 +450,36 @@ export namespace Server {
         },
       )
       .post(
+        "/session_generate_verb",
+        describeRoute({
+          description: "Generate a contextual status verb for typing preview",
+          responses: {
+            200: {
+              description: "Generated status verb",
+              content: {
+                "application/json": {
+                  schema: resolver(z.object({
+                    verb: z.string(),
+                  })),
+                },
+              },
+            },
+          },
+        }),
+        zValidator(
+          "json",
+          z.object({
+            text: z.string(),
+            providerID: z.string(),
+          }),
+        ),
+        async (c) => {
+          const body = c.req.valid("json")
+          const verb = await Session.generateStatusVerb(body.text, body.providerID)
+          return c.json({ verb })
+        },
+      )
+      .post(
         "/provider_list",
         describeRoute({
           description: "List all providers",

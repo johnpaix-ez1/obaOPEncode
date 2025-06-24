@@ -1,9 +1,11 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -18,6 +20,19 @@ import (
 	"github.com/sst/opencode/internal/theme"
 	"github.com/sst/opencode/internal/util"
 )
+
+type VerbGeneratedMsg struct {
+	Verb string
+	Text string
+}
+
+type NoOpMsg struct{}
+
+type generateVerbTriggerMsg struct {
+	text string
+}
+
+type VerbCycleMsg struct{}
 
 type EditorComponent interface {
 	tea.Model
@@ -43,10 +58,43 @@ type editorComponent struct {
 	historyIndex   int
 	currentMessage string
 	spinner        spinner.Model
+	verbText       string
 }
 
 func (m *editorComponent) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.spinner.Tick, tea.EnableReportFocus)
+	return tea.Batch(
+		textarea.Blink,
+		m.spinner.Tick,
+		tea.EnableReportFocus,
+		tea.Every(2*time.Second, func(t time.Time) tea.Msg {
+			return VerbCycleMsg{}
+		}),
+	)
+}
+
+func (m *editorComponent) generateVerbCmd(text string) tea.Cmd {
+	if len(strings.TrimSpace(text)) < 3 {
+		return nil
+	}
+
+	return func() tea.Msg {
+		if m.app.Provider == nil {
+			return NoOpMsg{}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		verb, err := m.app.GenerateStatusVerb(ctx, text)
+		if err != nil {
+			return NoOpMsg{}
+		}
+
+		return VerbGeneratedMsg{
+			Verb: verb,
+			Text: text,
+		}
+	}
 }
 
 func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -54,14 +102,60 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case NoOpMsg:
+		return m, nil
+
+	case generateVerbTriggerMsg:
+		// Only generate if we haven't already for this text
+		if msg.text != m.verbText {
+			m.verbText = msg.text
+			if cmd := m.generateVerbCmd(msg.text); cmd != nil {
+				return m, cmd
+			}
+		}
+		return m, nil
+
+	case VerbGeneratedMsg:
+		currentText := strings.TrimSpace(m.textarea.Value())
+		if currentText == msg.Text {
+			m.app.AddPromptVerb(msg.Verb)
+			m.app.VerbIndex = 0
+		}
+		return m, nil
+
+	case VerbCycleMsg:
+		if m.app.IsBusy() {
+			m.app.CycleToNextVerb()
+		}
+		return m, tea.Every(2*time.Second, func(t time.Time) tea.Msg {
+			return VerbCycleMsg{}
+		})
+
 	case spinner.TickMsg:
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+
 	case tea.KeyPressMsg:
 		// Maximize editor responsiveness for printable characters
 		if msg.Text != "" {
+			if m.textarea.Value() == "" {
+				m.app.ResetPromptVerbs()
+				m.verbText = ""
+			}
+
 			m.textarea, cmd = m.textarea.Update(msg)
 			cmds = append(cmds, cmd)
+
+			currentText := strings.TrimSpace(m.textarea.Value())
+			if len(currentText) >= 3 {
+				cmds = append(cmds, tea.Tick(800*time.Millisecond, func(t time.Time) tea.Msg {
+					if strings.TrimSpace(m.textarea.Value()) == currentText {
+						return generateVerbTriggerMsg{text: currentText}
+					}
+					return NoOpMsg{}
+				}))
+			}
+
 			return m, tea.Batch(cmds...)
 		}
 	case dialog.ThemeSelectedMsg:
@@ -103,6 +197,14 @@ func (m *editorComponent) Content() string {
 		Foreground(t.Primary())
 	prompt := promptStyle.Render(">")
 
+	statusLine := ""
+	if m.app.IsBusy() {
+		statusVerb := strings.ToLower(m.app.GetStatusVerb())
+		statusLine = styles.Padded().
+			Background(t.Background()).
+			Render(muted(statusVerb) + m.spinner.View())
+	}
+
 	textarea := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		prompt,
@@ -117,7 +219,7 @@ func (m *editorComponent) Content() string {
 
 	hint := base("enter") + muted(" send   ")
 	if m.app.IsBusy() {
-		hint = muted("working") + m.spinner.View() + muted("  ") + base("esc") + muted(" interrupt")
+		hint = base("esc") + muted(" interrupt")
 	}
 
 	model := ""
@@ -131,7 +233,8 @@ func (m *editorComponent) Content() string {
 	info := hint + spacer + model
 	info = styles.Padded().Background(t.Background()).Render(info)
 
-	content := strings.Join([]string{"", textarea, info}, "\n")
+	content := strings.Join([]string{"", statusLine, textarea, info}, "\n")
+
 	return content
 }
 
@@ -168,35 +271,40 @@ func (m *editorComponent) Submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if len(value) > 0 && value[len(value)-1] == '\\' {
-		// If the last character is a backslash, remove it and add a newline
 		m.textarea.SetValue(value[:len(value)-1] + "\n")
 		return m, nil
 	}
 
 	var cmds []tea.Cmd
+
+	// Check if we need to generate verb before clearing
+	needVerb := len(value) >= 3 && value != m.verbText
+
 	updated, cmd := m.Clear()
 	m = updated.(*editorComponent)
 	cmds = append(cmds, cmd)
 
 	attachments := m.attachments
+	m.attachments = []app.Attachment{}
 
-	// Save to history if not empty and not a duplicate of the last entry
-	if value != "" {
-		if len(m.history) == 0 || m.history[len(m.history)-1] != value {
-			m.history = append(m.history, value)
+	cmds = append(cmds, util.CmdHandler(app.SendMsg{
+		Text:        value,
+		Attachments: attachments,
+	}))
+
+	// Generate verb for submitted text only if we haven't already
+	if needVerb {
+		if verbCmd := m.generateVerbCmd(value); verbCmd != nil {
+			cmds = append(cmds, verbCmd)
 		}
-		m.historyIndex = len(m.history)
-		m.currentMessage = ""
 	}
 
-	m.attachments = nil
-
-	cmds = append(cmds, util.CmdHandler(app.SendMsg{Text: value, Attachments: attachments}))
 	return m, tea.Batch(cmds...)
 }
 
 func (m *editorComponent) Clear() (tea.Model, tea.Cmd) {
 	m.textarea.Reset()
+	m.verbText = ""
 	return m, nil
 }
 
@@ -317,5 +425,6 @@ func NewEditorComponent(app *app.App) EditorComponent {
 		historyIndex:   0,
 		currentMessage: "",
 		spinner:        s,
+		verbText:       "",
 	}
 }

@@ -470,6 +470,7 @@ func (a appModel) executeCommand(command commands.Command) (tea.Model, tea.Cmd) 
 			return a, nil
 		}
 		a.app.Cancel(context.Background(), a.app.Session.Id)
+		a.app.ResetPromptVerbs()
 		return a, nil
 	case commands.SessionCompactCommand:
 		if a.app.Session.Id == "" {

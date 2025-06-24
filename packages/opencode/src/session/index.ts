@@ -224,6 +224,63 @@ export namespace Session {
     })
   }
 
+  export async function generateStatusVerb(userMessage: string, providerID: string): Promise<string> {
+    const log = Log.create({ service: "verb-generator" })
+    const fallback = "Processing"
+    try {
+      let verbModelID: string | undefined
+      let verbProviderID: string | undefined
+      switch (providerID) {
+        case "anthropic":
+          verbModelID = "claude-3-5-haiku-20241022"
+          verbProviderID = "anthropic"
+          break
+        case "openai":
+          verbModelID = "gpt-4o-mini"
+          verbProviderID = "openai"
+          break
+        default:
+      }
+
+      if (!verbModelID || !verbProviderID) {
+        return fallback
+      }
+
+      try {
+        await Provider.getModel(verbProviderID, verbModelID)
+      } catch {
+        return fallback
+      }
+
+      const model = await Provider.getModel(verbProviderID, verbModelID)
+
+      const result = await generateText({
+        model: model.language,
+        messages: [
+          {
+            role: "system",
+            content: SystemPrompt.verb()
+          },
+          {
+            role: "user",
+            content: userMessage
+          }],
+        maxTokens: 10,
+      })
+
+      const verb = result.text?.trim() || "Processing"
+
+      if (verb.length > 20 || verb.includes(' ') || !/^[A-Z][a-z]+ing$/.test(verb)) {
+        return fallback
+      }
+
+      return verb
+    } catch (error) {
+      log.error("Failed to generate status verb", { error })
+      return fallback
+    }
+  }
+
   export async function chat(input: {
     sessionID: string
     providerID: string
