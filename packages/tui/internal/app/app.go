@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"log/slog"
@@ -23,24 +22,29 @@ import (
 var RootPath string
 
 type App struct {
-	Info      client.AppInfo
-	Version   string
-	StatePath string
-	Config    *client.ConfigInfo
-	Client    *client.ClientWithResponses
-	State     *config.State
-	Provider  *client.ProviderInfo
-	Model     *client.ModelInfo
-	Session   *client.SessionInfo
-	Messages  []client.MessageInfo
-	Commands  commands.CommandRegistry
+	Info          client.AppInfo
+	Version       string
+	StatePath     string
+	Config        *client.ConfigInfo
+	Client        *client.ClientWithResponses
+	State         *config.State
+	MainProvider  *client.ProviderInfo
+	MainModel     *client.ModelInfo
+	TurboProvider *client.ProviderInfo
+	TurboModel    *client.ModelInfo
+	Session       *client.SessionInfo
+	Messages      []client.MessageInfo
+	Commands      commands.CommandRegistry
 }
 
 type SessionSelectedMsg = *client.SessionInfo
 type ModelSelectedMsg struct {
-	Provider client.ProviderInfo
-	Model    client.ModelInfo
+	MainProvider  client.ProviderInfo
+	MainModel     client.ModelInfo
+	TurboProvider client.ProviderInfo
+	TurboModel    client.ModelInfo
 }
+
 type SessionClearedMsg struct{}
 type CompactSessionMsg struct{}
 type SendMsg struct {
@@ -89,9 +93,10 @@ func New(
 		appState.Theme = *configInfo.Theme
 	}
 	if configInfo.Model != nil {
-		splits := strings.Split(*configInfo.Model, "/")
-		appState.Provider = splits[0]
-		appState.Model = strings.Join(splits[1:], "/")
+		appState.MainProvider, appState.MainModel = util.ParseModel(*configInfo.Model)
+	}
+	if configInfo.TurboModel != nil {
+		appState.TurboProvider, appState.TurboModel = util.ParseModel(*configInfo.TurboModel)
 	}
 
 	// Load themes from all directories
@@ -174,11 +179,11 @@ func (a *App) InitializeProvider() tea.Cmd {
 		var currentProvider *client.ProviderInfo
 		var currentModel *client.ModelInfo
 		for _, provider := range providers {
-			if provider.Id == a.State.Provider {
+			if provider.Id == a.State.MainProvider {
 				currentProvider = &provider
 
 				for _, model := range provider.Models {
-					if model.Id == a.State.Model {
+					if model.Id == a.State.MainModel {
 						currentModel = &model
 					}
 				}
@@ -189,10 +194,15 @@ func (a *App) InitializeProvider() tea.Cmd {
 			currentModel = defaultModel
 		}
 
+		// Initialize turbo model based on config or defaults
+		turboProvider, turboModel := findTurboModel(a.State, a.Config, providers, currentProvider, currentModel)
+
 		// TODO: handle no provider or model setup, yet
 		return ModelSelectedMsg{
-			Provider: *currentProvider,
-			Model:    *currentModel,
+			MainProvider:  *currentProvider,
+			MainModel:     *currentModel,
+			TurboProvider: *turboProvider,
+			TurboModel:    *turboModel,
 		}
 	}
 }
@@ -207,6 +217,44 @@ func getDefaultModel(response *client.PostProviderListResponse, provider client.
 		}
 	}
 	return nil
+}
+
+func findTurboModel(state *config.State, config *client.ConfigInfo, providers []client.ProviderInfo, currentProvider *client.ProviderInfo, currentModel *client.ModelInfo) (*client.ProviderInfo, *client.ModelInfo) {
+	// If turbo model is configured in state, use it
+	if state.TurboProvider != "" && state.TurboModel != "" {
+		for _, provider := range providers {
+			if provider.Id == state.TurboProvider {
+				for _, model := range provider.Models {
+					if model.Id == state.TurboModel {
+						return &provider, &model
+					}
+				}
+			}
+		}
+	}
+
+	// Get threshold from config or use default
+	threshold := float32(4.0)
+	if config != nil && config.TurboCostThreshold != nil {
+		threshold = *config.TurboCostThreshold
+	}
+
+	// Find the cheapest model in the current provider that qualifies as turbo
+	var turboModel *client.ModelInfo
+	for _, model := range currentProvider.Models {
+		if model.Cost.Output <= threshold {
+			if turboModel == nil || model.Cost.Output < turboModel.Cost.Output {
+				tmp := model
+				turboModel = &tmp
+			}
+		}
+	}
+
+	// Return turbo model if found, otherwise fall back to main model
+	if turboModel != nil {
+		return currentProvider, turboModel
+	}
+	return currentProvider, currentModel
 }
 
 type Attachment struct {
@@ -247,8 +295,8 @@ func (a *App) InitializeProject(ctx context.Context) tea.Cmd {
 	go func() {
 		response, err := a.Client.PostSessionInitialize(ctx, client.PostSessionInitializeJSONRequestBody{
 			SessionID:  a.Session.Id,
-			ProviderID: a.Provider.Id,
-			ModelID:    a.Model.Id,
+			ProviderID: a.MainProvider.Id,
+			ModelID:    a.MainModel.Id,
 		})
 		if err != nil {
 			slog.Error("Failed to initialize project", "error", err)
@@ -265,10 +313,18 @@ func (a *App) InitializeProject(ctx context.Context) tea.Cmd {
 
 func (a *App) CompactSession(ctx context.Context) tea.Cmd {
 	go func() {
+		// Use turbo model for summarization if available
+		providerID := a.MainProvider.Id
+		modelID := a.MainModel.Id
+		if a.TurboProvider != nil && a.TurboModel != nil {
+			providerID = a.TurboProvider.Id
+			modelID = a.TurboModel.Id
+		}
+
 		response, err := a.Client.PostSessionSummarizeWithResponse(ctx, client.PostSessionSummarizeJSONRequestBody{
 			SessionID:  a.Session.Id,
-			ProviderID: a.Provider.Id,
-			ModelID:    a.Model.Id,
+			ProviderID: providerID,
+			ModelID:    modelID,
 		})
 		if err != nil {
 			slog.Error("Failed to compact session", "error", err)
@@ -345,8 +401,8 @@ func (a *App) SendChatMessage(ctx context.Context, text string, attachments []At
 		response, err := a.Client.PostSessionChat(ctx, client.PostSessionChatJSONRequestBody{
 			SessionID:  a.Session.Id,
 			Parts:      parts,
-			ProviderID: a.Provider.Id,
-			ModelID:    a.Model.Id,
+			ProviderID: a.MainProvider.Id,
+			ModelID:    a.MainModel.Id,
 		})
 		if err != nil {
 			errormsg := fmt.Sprintf("failed to send message: %v", err)

@@ -155,6 +155,15 @@ export namespace Config {
           "Model to use in the format of provider/model, eg anthropic/claude-2",
         )
         .optional(),
+      turbo_model: z
+        .string()
+        .describe("Turbo model to use for tasks like window title generation")
+        .optional(),
+      turbo_cost_threshold: z
+        .number()
+        .describe("Maximum output cost for a model to be considered a turbo model (default: 4)")
+        .default(4)
+        .optional(),
       provider: z
         .record(
           ModelsDev.Provider.partial().extend({
@@ -221,7 +230,7 @@ export namespace Config {
         )
         await fs.unlink(path.join(Global.Path.config, "config"))
       })
-      .catch(() => {})
+      .catch(() => { })
 
     return result
   })

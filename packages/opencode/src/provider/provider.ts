@@ -39,15 +39,15 @@ export namespace Provider {
   type Source = "env" | "config" | "custom" | "api"
 
   const CUSTOM_LOADERS: Record<string, CustomLoader> = {
-    async anthropic(provider) {
+    async anthropic() {
       const access = await AuthAnthropic.access()
       if (!access) return { autoload: false }
-      for (const model of Object.values(provider.models)) {
-        model.cost = {
-          input: 0,
-          output: 0,
-        }
-      }
+      // for (const model of Object.values(provider.models)) {
+      //   model.cost = {
+      //     input: 0,
+      //     output: 0,
+      //   }
+      // }
       return {
         autoload: true,
         options: {
@@ -393,6 +393,50 @@ export namespace Provider {
       providerID: providerID,
       modelID: rest.join("/"),
     }
+  }
+
+  export async function isTurboModel(model: ModelsDev.Model): Promise<boolean> {
+    const cfg = await Config.get()
+    const threshold = cfg.turbo_cost_threshold ?? 4
+    return model.cost.output <= threshold
+  }
+
+  export async function getTurboModel(providerID: string): Promise<{ info: ModelsDev.Model; language: LanguageModel } | null> {
+    const cfg = await Config.get()
+    
+    // Check user override
+    if (cfg.turbo_model) {
+      try {
+        // Parse the turbo model to get its provider
+        const { providerID: turboProviderID, modelID } = parseModel(cfg.turbo_model)
+        return await getModel(turboProviderID, modelID)
+      } catch (e) {
+        log.warn("Failed to get configured turbo model", { turbo_model: cfg.turbo_model, error: e })
+      }
+    }
+    
+    const providers = await list()
+    const provider = providers[providerID]
+    if (!provider) return null
+
+    // Use configured threshold or default to 4
+    const threshold = cfg.turbo_cost_threshold ?? 4
+    
+    // Select cheapest model whose cost.output <= threshold for turbo tasks
+    let selected: { info: ModelsDev.Model; language: LanguageModel } | null = null
+    for (const model of Object.values(provider.info.models)) {
+      if (model.cost.output <= threshold) {
+        try {
+          const m = await getModel(providerID, model.id)
+          if (!selected || m.info.cost.output < selected.info.cost.output) {
+            selected = m
+          }
+        } catch {
+          // ignore errors and continue searching
+        }
+      }
+    }
+    return selected
   }
 
   const TOOLS = [

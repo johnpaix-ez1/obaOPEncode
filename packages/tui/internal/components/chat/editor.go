@@ -142,8 +142,17 @@ func (m *editorComponent) Content() string {
 	}
 
 	model := ""
-	if m.app.Model != nil {
-		model = muted(m.app.Provider.Name) + base(" "+m.app.Model.Name)
+	if m.app.MainModel != nil && m.app.MainProvider != nil {
+		model = muted(m.app.MainProvider.Name) + base(" "+m.app.MainModel.Name)
+
+		// show turbo model if configured
+		if m.app.TurboModel != nil && m.app.TurboProvider != nil {
+			if m.app.TurboProvider.Id == m.app.MainProvider.Id {
+				model = model + muted(" (⚡"+m.app.TurboModel.Name+")")
+			} else {
+				model = model + muted(" (⚡"+m.app.TurboProvider.Name+"/"+m.app.TurboModel.Name+")")
+			}
+		}
 	}
 
 	space := m.width - 2 - lipgloss.Width(model) - lipgloss.Width(hint)

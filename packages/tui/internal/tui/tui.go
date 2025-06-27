@@ -344,10 +344,16 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.app.Session = msg
 		a.app.Messages = messages
 	case app.ModelSelectedMsg:
-		a.app.Provider = &msg.Provider
-		a.app.Model = &msg.Model
-		a.app.State.Provider = msg.Provider.Id
-		a.app.State.Model = msg.Model.Id
+		a.app.MainProvider = &msg.MainProvider
+		a.app.MainModel = &msg.MainModel
+		a.app.TurboProvider = &msg.TurboProvider
+		a.app.TurboModel = &msg.TurboModel
+		a.app.State.MainProvider = msg.MainProvider.Id
+		a.app.State.MainModel = msg.MainModel.Id
+		a.app.State.TurboProvider = msg.TurboProvider.Id
+		a.app.State.TurboModel = msg.TurboModel.Id
+
+		// Save state and config
 		a.app.SaveState()
 	case dialog.ThemeSelectedMsg:
 		a.app.State.Theme = msg.ThemeName

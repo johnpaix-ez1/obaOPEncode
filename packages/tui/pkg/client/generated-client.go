@@ -87,14 +87,16 @@ type ConfigInfo struct {
 				Input      float32  `json:"input"`
 				Output     float32  `json:"output"`
 			} `json:"cost,omitempty"`
-			Id    *string `json:"id,omitempty"`
-			Limit *struct {
+			Id          *string `json:"id,omitempty"`
+			LastUpdated *string `json:"last_updated,omitempty"`
+			Limit       *struct {
 				Context float32 `json:"context"`
 				Output  float32 `json:"output"`
 			} `json:"limit,omitempty"`
 			Name        *string                 `json:"name,omitempty"`
 			Options     *map[string]interface{} `json:"options,omitempty"`
 			Reasoning   *bool                   `json:"reasoning,omitempty"`
+			ReleaseDate *string                 `json:"release_date,omitempty"`
 			Temperature *bool                   `json:"temperature,omitempty"`
 			ToolCall    *bool                   `json:"tool_call,omitempty"`
 		} `json:"models"`
@@ -105,6 +107,12 @@ type ConfigInfo struct {
 
 	// Theme Theme name to use for the interface
 	Theme *string `json:"theme,omitempty"`
+
+	// TurboCostThreshold Maximum output cost for a model to be considered a turbo model (default: 4)
+	TurboCostThreshold *float32 `json:"turbo_cost_threshold,omitempty"`
+
+	// TurboModel Turbo model to use for tasks like window title generation
+	TurboModel *string `json:"turbo_model,omitempty"`
 }
 
 // ConfigInfo_Mcp_AdditionalProperties defines model for Config.Info.mcp.AdditionalProperties.
@@ -463,14 +471,16 @@ type ModelInfo struct {
 		Input      float32  `json:"input"`
 		Output     float32  `json:"output"`
 	} `json:"cost"`
-	Id    string `json:"id"`
-	Limit struct {
+	Id          string  `json:"id"`
+	LastUpdated *string `json:"last_updated,omitempty"`
+	Limit       struct {
 		Context float32 `json:"context"`
 		Output  float32 `json:"output"`
 	} `json:"limit"`
 	Name        string                 `json:"name"`
 	Options     map[string]interface{} `json:"options"`
 	Reasoning   bool                   `json:"reasoning"`
+	ReleaseDate *string                `json:"release_date,omitempty"`
 	Temperature bool                   `json:"temperature"`
 	ToolCall    bool                   `json:"tool_call"`
 }
