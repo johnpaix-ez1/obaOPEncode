@@ -8,6 +8,8 @@ import { z } from "zod"
 import { Session } from "../session"
 import { Bus } from "../bus"
 
+import { substituteEnvVars, substituteEnvVarsInHeaders, substituteEnvVarsInObject } from "../util/env-substitution"
+
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
 
@@ -28,11 +30,15 @@ export namespace MCP {
       for (const [key, mcp] of Object.entries(cfg.mcp ?? {})) {
         log.info("found", { key, type: mcp.type })
         if (mcp.type === "remote") {
+          const url = substituteEnvVars(mcp.url)
+          const headers = substituteEnvVarsInHeaders(mcp.headers)
+          
           const client = await experimental_createMCPClient({
             name: key,
             transport: {
               type: "sse",
-              url: mcp.url,
+              url,
+              headers,
             },
           }).catch(() => {})
           if (!client) {
@@ -50,7 +56,9 @@ export namespace MCP {
         }
 
         if (mcp.type === "local") {
-          const [cmd, ...args] = mcp.command
+          const [cmd, ...args] = mcp.command.map(arg => substituteEnvVars(arg))
+          const environment = mcp.environment ? substituteEnvVarsInObject(mcp.environment) : undefined
+          
           const client = await experimental_createMCPClient({
             name: key,
             transport: new Experimental_StdioMCPTransport({
@@ -60,7 +68,7 @@ export namespace MCP {
               env: {
                 ...process.env,
                 ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
-                ...mcp.environment,
+                ...environment,
               },
             }),
           }).catch(() => {})
