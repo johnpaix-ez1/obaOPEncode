@@ -33,6 +33,45 @@ const (
 	maxLines = 10000
 )
 
+func keypadToChar(keyString string) string {
+	switch keyString {
+	case "kp0":
+		return "0"
+	case "kp1":
+		return "1"
+	case "kp2":
+		return "2"
+	case "kp3":
+		return "3"
+	case "kp4":
+		return "4"
+	case "kp5":
+		return "5"
+	case "kp6":
+		return "6"
+	case "kp7":
+		return "7"
+	case "kp8":
+		return "8"
+	case "kp9":
+		return "9"
+	case "kpplus":
+		return "+"
+	case "kpminus":
+		return "-"
+	case "kpmul":
+		return "*"
+	case "kpdiv":
+		return "/"
+	case "kpperiod":
+		return "."
+	case "kpequal":
+		return "="
+	default:
+		return ""
+	}
+}
+
 // Attachment represents a special object within the text, distinct from regular characters.
 type Attachment struct {
 	ID        string // A unique identifier for this attachment instance
@@ -1512,7 +1551,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.transposeLeft()
 
 		default:
-			m.insertRunesFromUserInput([]rune(msg.Text))
+			// Handle keypad keys by converting them to their character equivalents
+			if msg.Text == "" {
+				if char := keypadToChar(msg.String()); char != "" {
+					m.insertRunesFromUserInput([]rune(char))
+				}
+			} else {
+				m.insertRunesFromUserInput([]rune(msg.Text))
+			}
 		}
 
 	case pasteMsg:
