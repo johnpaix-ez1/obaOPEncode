@@ -157,6 +157,10 @@ export namespace Config {
         .array(z.string())
         .optional()
         .describe("Disable providers that are loaded automatically"),
+      onlyConfigModels: z
+        .boolean()
+        .optional()
+        .describe("Only show models that are explicitly defined in the config (global setting)"),
       model: z
         .string()
         .describe(
@@ -168,6 +172,10 @@ export namespace Config {
           ModelsDev.Provider.partial().extend({
             models: z.record(ModelsDev.Model.partial()),
             options: z.record(z.any()).optional(),
+            onlyConfigModels: z
+              .boolean()
+              .optional()
+              .describe("Only show models that are explicitly defined in the config for this provider"),
           }),
         )
         .optional()
