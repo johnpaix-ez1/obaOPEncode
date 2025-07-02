@@ -23,9 +23,66 @@ import (
 	"golang.org/x/text/language"
 )
 
+func processInlineCode(line string) string {
+	var result strings.Builder
+	inCode := false
+	
+	for i := 0; i < len(line); i++ {
+		if i < len(line)-1 && line[i] == '`' && line[i+1] != '`' {
+			// Switching in or out of inline code
+			inCode = !inCode
+			result.WriteByte('`')
+		} else if line[i] == '<' && !inCode {
+			result.WriteString("\\<")
+		} else if line[i] == '>' && !inCode {
+			result.WriteString("\\>")
+		} else {
+			result.WriteByte(line[i])
+		}
+	}
+	
+	return result.String()
+}
+
+func processContentForAngleBrackets(content string) string {
+	var processed strings.Builder
+	inCodeBlock := false
+	codeBlockMarker := ""
+	
+	contentLines := strings.Split(content, "\n")
+	for i, line := range contentLines {
+		// Check for code block markers (``` or ~~~)
+		if strings.HasPrefix(strings.TrimSpace(line), "```") || strings.HasPrefix(strings.TrimSpace(line), "~~~") {
+			marker := line[:3]
+			if !inCodeBlock {
+				inCodeBlock = true
+				codeBlockMarker = marker
+			} else if strings.HasPrefix(strings.TrimSpace(line), codeBlockMarker) {
+				inCodeBlock = false
+			}
+			processed.WriteString(line)
+		} else if inCodeBlock {
+			processed.WriteString(line)
+		} else {
+			// Outside code block - handle inline code and escape any non-backticked-enclosed angle brackets
+			processedLine := processInlineCode(line)
+			processed.WriteString(processedLine)
+		}
+		
+		// Add newline unless it's the last line
+		if i < len(contentLines)-1 {
+			processed.WriteString("\n")
+		}
+	}
+	
+	return processed.String()
+}
+
 func toMarkdown(content string, width int, backgroundColor compat.AdaptiveColor) string {
 	r := styles.GetMarkdownRenderer(width-7, backgroundColor)
 	content = strings.ReplaceAll(content, app.RootPath+"/", "")
+	content = processContentForAngleBrackets(content)
+
 	rendered, _ := r.Render(content)
 	lines := strings.Split(rendered, "\n")
 
