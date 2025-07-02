@@ -355,6 +355,46 @@
         }
       },
       "additionalProperties": false
+    },
+    "discord": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Discord Rich Presence"
+        },
+        "applicationId": {
+          "type": "string",
+          "description": "Discord application ID for Rich Presence"
+        },
+        "showModel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show current AI model in presence"
+        },
+        "showProject": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show current project name in presence"
+        },
+        "showSession": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show session information in presence"
+        },
+        "showShareUrl": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show share URL button when session is shared"
+        },
+        "customStatus": {
+          "type": "string",
+          "description": "Custom status text to display"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Discord Rich Presence configuration"
     }
   },
   "additionalProperties": false,
