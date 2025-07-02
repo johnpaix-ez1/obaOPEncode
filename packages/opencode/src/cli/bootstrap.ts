@@ -1,5 +1,6 @@
 import { App } from "../app/app"
 import { ConfigHooks } from "../config/hooks"
+import { Discord } from "../discord/discord"
 import { FileWatcher } from "../file/watch"
 import { Format } from "../format"
 import { LSP } from "../lsp"
@@ -14,6 +15,7 @@ export async function bootstrap<T>(
     Format.init()
     ConfigHooks.init()
     LSP.init()
+    Discord.init()
     FileWatcher.init()
 
     return cb(app)

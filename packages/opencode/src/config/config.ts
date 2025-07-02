@@ -10,6 +10,7 @@ import fs from "fs/promises"
 import { lazy } from "../util/lazy"
 import { NamedError } from "../util/error"
 
+
 export namespace Config {
   const log = Log.create({ service: "config" })
 
@@ -202,6 +203,33 @@ export namespace Config {
             .optional(),
         })
         .optional(),
+      discord: z
+        .object({
+          enabled: z.boolean().default(false).describe("Enable Discord Rich Presence"),
+          applicationId: z
+            .string()
+            .optional()
+            .describe("Discord application ID for Rich Presence"),
+          showModel: z
+            .boolean()
+            .default(true)
+            .describe("Show current AI model in presence"),
+          showProject: z
+            .boolean()
+            .default(true)
+            .describe("Show current project name in presence"),
+          showSession: z
+            .boolean()
+            .default(true)
+            .describe("Show session information in presence"),
+          customStatus: z
+            .string()
+            .optional()
+            .describe("Custom status text to display"),
+        })
+        .strict()
+        .optional()
+        .describe("Discord Rich Presence configuration"),
     })
     .strict()
     .openapi({

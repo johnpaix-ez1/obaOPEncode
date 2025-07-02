@@ -31,6 +31,7 @@
     "@hono/zod-validator": "0.5.0",
     "@openauthjs/openauth": "0.4.3",
     "@standard-schema/spec": "1.0.0",
+    "@xhayper/discord-rpc": "1.2.2",
     "ai": "catalog:",
     "decimal.js": "10.5.0",
     "diff": "8.0.2",
