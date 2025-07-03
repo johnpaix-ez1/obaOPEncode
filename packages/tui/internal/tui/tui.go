@@ -134,10 +134,13 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		keyString := msg.String()
+		// Log all key presses for debugging
+		slog.Debug("KeyPress received", "string", keyString)
+
+		// 1. Workaround for scroll bug
 		if time.Since(a.lastScroll) < time.Millisecond*100 && (BUGGED_SCROLL_KEYS[keyString] || isScrollRelatedInput(keyString)) {
 			return a, nil
 		}
-
 		// 1. Handle active modal
 		if a.modal != nil {
 			switch keyString {
@@ -268,6 +271,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// 7. Check again for commands that don't require leader (excluding interrupt when busy)
 		matches := a.app.Commands.Matches(msg, a.isLeaderSequence)
+		slog.Debug("Command matches", "count", len(matches), "key", msg.String())
 		if len(matches) > 0 {
 			// Skip interrupt key if we're in debounce mode and app is busy
 			if interruptCommand.Matches(msg, a.isLeaderSequence) && a.app.IsBusy() && a.interruptKeyState != InterruptKeyIdle {
@@ -281,17 +285,115 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updatedEditor, cmd := a.editor.Update(msg)
 		a.editor = updatedEditor.(chat.EditorComponent)
 		return a, cmd
-	case tea.MouseWheelMsg:
-		a.lastScroll = time.Now()
+	case tea.MouseWheelMsg, tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
+		// Track scroll time for MouseWheelMsg (from dev branch)
+		if _, ok := msg.(tea.MouseWheelMsg); ok {
+			a.lastScroll = time.Now()
+		}
+		// Log mouse events for debugging
+		switch m := msg.(type) {
+		case tea.MouseClickMsg:
+			slog.Debug("TUI: Mouse click", "x", m.X, "y", m.Y, "button", m.Button)
+		case tea.MouseMotionMsg:
+			// Don't log motion events as they're too frequent
+		}
 		if a.modal != nil {
 			return a, nil
 		}
 
-		var cmd tea.Cmd
-		if a.fileViewerHit {
-			a.fileViewer, cmd = a.fileViewer.Update(msg)
-			cmds = append(cmds, cmd)
+		// Check if mouse event is within editor bounds
+		editorX, editorY := a.editorContainer.GetPosition()
+		editorWidth, editorHeight := a.editorContainer.GetSize()
+
+		// If editor container has no size, it hasn't been laid out yet
+		if editorWidth == 0 || editorHeight == 0 {
+			// Just route to messages for now
+			var cmd tea.Cmd
+			if a.fileViewerHit {
+				a.fileViewer, cmd = a.fileViewer.Update(msg)
+				cmds = append(cmds, cmd)
+			} else {
+				updated, cmd := a.messages.Update(msg)
+				a.messages = updated.(chat.MessagesComponent)
+				cmds = append(cmds, cmd)
+			}
+			return a, tea.Batch(cmds...)
+		}
+
+		// For multi-line editor, adjust position
+		if a.editor.Lines() > 1 {
+			editorY = editorY - a.editor.Lines() + 1
+			editorHeight = a.editor.Lines()
+		}
+
+		mouseX, mouseY := 0, 0
+		switch evt := msg.(type) {
+		case tea.MouseClickMsg:
+			mouseX, mouseY = evt.X, evt.Y
+			slog.Debug("Mouse click bounds check",
+				"mouseX", mouseX, "mouseY", mouseY,
+				"editorX", editorX, "editorY", editorY,
+				"editorWidth", editorWidth, "editorHeight", editorHeight,
+				"editorLines", a.editor.Lines())
+		case tea.MouseMotionMsg:
+			mouseX, mouseY = evt.X, evt.Y
+		case tea.MouseReleaseMsg:
+			mouseX, mouseY = evt.X, evt.Y
+		}
+
+		// Check if mouse is within editor bounds
+		// Use <= for bottom edge to include the last line
+		inBounds := mouseX >= editorX && mouseX < editorX+editorWidth &&
+			mouseY >= editorY && mouseY <= editorY+editorHeight-1
+
+		slog.Debug("Editor bounds check result",
+			"inBounds", inBounds,
+			"mouseX", mouseX, "mouseY", mouseY,
+			"editorX", editorX, "editorY", editorY,
+			"editorWidth", editorWidth, "editorHeight", editorHeight)
+
+		if inBounds {
+			// Translate coordinates to editor-relative
+			switch evt := msg.(type) {
+			case tea.MouseClickMsg:
+				evt.X = mouseX - editorX
+				evt.Y = mouseY - editorY
+				slog.Debug("Routing click to editor",
+					"relativeX", evt.X, "relativeY", evt.Y)
+				updated, cmd := a.editor.Update(evt)
+				a.editor = updated.(chat.EditorComponent)
+				cmds = append(cmds, cmd)
+			case tea.MouseMotionMsg:
+				evt.X = mouseX - editorX
+				evt.Y = mouseY - editorY
+				updated, cmd := a.editor.Update(evt)
+				a.editor = updated.(chat.EditorComponent)
+				cmds = append(cmds, cmd)
+			case tea.MouseReleaseMsg:
+				evt.X = mouseX - editorX
+				evt.Y = mouseY - editorY
+				updated, cmd := a.editor.Update(evt)
+				a.editor = updated.(chat.EditorComponent)
+				cmds = append(cmds, cmd)
+			case tea.MouseWheelMsg:
+				// For mouse wheel, just pass it through without coordinate translation
+				// The Y field contains the scroll direction, not position
+				updated, cmd := a.editor.Update(evt)
+				a.editor = updated.(chat.EditorComponent)
+				cmds = append(cmds, cmd)
+			}
 		} else {
+			// Route to messages or file viewer
+			var cmd tea.Cmd
+			if a.fileViewerHit {
+				a.fileViewer, cmd = a.fileViewer.Update(msg)
+				cmds = append(cmds, cmd)
+			} else {
+				updated, cmd := a.messages.Update(msg)
+				a.messages = updated.(chat.MessagesComponent)
+				cmds = append(cmds, cmd)
+			}
+		}
 			updated, cmd := a.messages.Update(msg)
 			a.messages = updated.(chat.MessagesComponent)
 			cmds = append(cmds, cmd)
@@ -946,6 +1048,17 @@ func (a appModel) executeCommand(command commands.Command) (tea.Model, tea.Cmd) 
 		}
 	case commands.MessagesPreviousCommand:
 		updated, cmd := a.messages.Previous()
+		a.messages = updated.(chat.MessagesComponent)
+		cmds = append(cmds, cmd)
+	case commands.SelectionCopyCommand:
+		slog.Debug("SelectionCopyCommand triggered", "hasSelection", a.messages.HasSelection())
+		if a.messages.HasSelection() {
+			updated, cmd := a.messages.CopySelection()
+			a.messages = updated.(chat.MessagesComponent)
+			cmds = append(cmds, cmd)
+		}
+	case commands.SelectionAllCommand:
+		updated, cmd := a.messages.SelectAll()
 		a.messages = updated.(chat.MessagesComponent)
 		cmds = append(cmds, cmd)
 	case commands.MessagesNextCommand:

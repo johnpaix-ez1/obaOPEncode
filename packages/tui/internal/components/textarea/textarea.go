@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"image/color"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -312,6 +313,28 @@ type Model struct {
 	// vertically such that we can maintain the same navigating position.
 	lastCharOffset int
 
+	// scrollOffset is the number of display lines scrolled from the top
+	// when content exceeds MaxHeight. Used for viewport-like behavior.
+	scrollOffset int
+
+	// manualScrolling indicates scrollbar is being used, prevents cursor from forcing view
+	manualScrolling bool
+
+	// scrollbarActive tracks if we're currently interacting with the scrollbar
+	// to prevent cursor from forcing viewport changes
+	scrollbarActive bool
+
+	// scrollLocked prevents ensureCursorVisible from adjusting viewport after manual scrolling
+	// Reset on any cursor movement or text input
+	scrollLocked bool
+
+	// scrollbarDragging tracks if we're actively dragging the scrollbar
+	scrollbarDragging bool
+
+	// scrollbarDragStartY tracks the initial Y position when dragging starts
+	scrollbarDragStartY      int
+	scrollbarDragStartOffset int
+
 	// rune sanitizer for input.
 	rsan Sanitizer
 }
@@ -334,6 +357,7 @@ func New() Model {
 		VirtualCursor:        true,
 		virtualCursor:        cur,
 		KeyMap:               DefaultKeyMap(),
+		scrollbarDragStartY:  -1,
 
 		value: make([][]rune, minHeight, maxLines),
 		focus: false,
@@ -1037,15 +1061,113 @@ func (m Model) ContentHeight() int {
 
 // SetHeight sets the height of the textarea.
 func (m *Model) SetHeight(h int) {
-	// Calculate the actual content height
-	contentHeight := m.ContentHeight()
-
-	// Use the content height as the actual height
+	// If MaxHeight is set, grow up to MaxHeight based on content, then use viewport
 	if m.MaxHeight > 0 {
-		m.height = clamp(contentHeight, minHeight, m.MaxHeight)
+		contentHeight := m.ContentHeight()
+		// Grow naturally up to MaxHeight, then stay fixed for viewport scrolling
+		if contentHeight <= m.MaxHeight {
+			m.height = max(contentHeight, minHeight)
+		} else {
+			m.height = m.MaxHeight
+		}
 	} else {
+		// Calculate the actual content height for auto-expanding behavior
+		contentHeight := m.ContentHeight()
 		m.height = max(contentHeight, minHeight)
 	}
+}
+
+// ScrollOffset returns the current scroll offset
+func (m *Model) ScrollOffset() int {
+	return m.scrollOffset
+}
+
+// SetScrollOffset sets the scroll offset
+func (m *Model) SetScrollOffset(offset int) {
+	m.scrollOffset = offset
+}
+
+// SetScrollbarActive sets whether the scrollbar is currently being interacted with
+func (m *Model) SetScrollbarActive(active bool) {
+	m.scrollbarActive = active
+}
+
+// SetScrollLocked sets whether the viewport is locked after manual scrolling
+// When locked, ensureCursorVisible won't adjust the viewport
+func (m *Model) SetScrollLocked(locked bool) {
+	m.scrollLocked = locked
+}
+
+// isCursorInViewport checks if the cursor is currently visible in the viewport
+func (m *Model) isCursorInViewport() bool {
+	if m.MaxHeight <= 0 {
+		return true // No viewport restriction
+	}
+
+	cursorLine := m.cursorLineNumber()
+	return cursorLine >= m.scrollOffset && cursorLine < m.scrollOffset+m.MaxHeight
+}
+
+// MoveCursorToVisibleLine moves the cursor to a line that's currently visible in the viewport
+// This is useful after scrolling to prevent the view from snapping back to the cursor
+func (m *Model) MoveCursorToVisibleLine() {
+	if m.MaxHeight <= 0 {
+		return
+	}
+
+	// Calculate middle of viewport
+	targetDisplayLine := m.scrollOffset + (m.MaxHeight / 2)
+
+	// Find which row corresponds to this display line
+	currentLine := 0
+	targetRow := 0
+	targetWrappedLine := 0
+
+	for row, line := range m.value {
+		wrappedLines := m.memoizedWrap(line, m.width)
+		for wl := range wrappedLines {
+			if currentLine == targetDisplayLine {
+				// Found the target line
+				targetRow = row
+				targetWrappedLine = wl
+				goto found
+			}
+			currentLine++
+
+			// If we've gone past the last line, use the last line
+			if currentLine > targetDisplayLine {
+				targetRow = row
+				targetWrappedLine = wl
+				goto found
+			}
+		}
+	}
+
+	// If we didn't find it (shouldn't happen), use the last row
+	if len(m.value) > 0 {
+		targetRow = len(m.value) - 1
+	}
+
+found:
+	// Move cursor to the target row
+	m.row = targetRow
+
+	// Try to maintain column position if possible
+	if m.col > len(m.value[m.row]) {
+		m.col = len(m.value[m.row])
+	}
+
+	// If we're on a wrapped line, adjust column to be on the visible wrapped portion
+	if targetWrappedLine > 0 && len(m.value[m.row]) > 0 {
+		wrappedLines := m.memoizedWrap(m.value[m.row], m.width)
+		if targetWrappedLine < len(wrappedLines) {
+			// Calculate approximate column position on the wrapped line
+			charsPerLine := m.width
+			m.col = min(targetWrappedLine*charsPerLine, len(m.value[m.row]))
+		}
+	}
+
+	m.lastCharOffset = 0
 }
 
 // Update is the Bubble Tea update loop.
@@ -1071,7 +1193,122 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.PasteMsg:
 		m.insertRunesFromUserInput([]rune(msg))
+
+	case tea.MouseClickMsg:
+		// Handle mouse clicks to position cursor
+		// Clear scroll lock since user is actively positioning cursor
+		m.scrollLocked = false
+		m.manualScrolling = false
+		m.scrollbarActive = false
+
+		// Calculate which line was clicked
+		clickY := msg.Y
+		clickX := msg.X
+
+		slog.Debug("Textarea received click",
+			"x", clickX,
+			"y", clickY,
+			"scrollOffset", m.scrollOffset,
+			"MaxHeight", m.MaxHeight)
+		// Account for line numbers if shown
+		if m.ShowLineNumbers {
+			// Adjust for line number width
+			digits := len(strconv.Itoa(m.MaxHeight))
+			lineNumberWidth := digits + 3 // spaces and padding
+			clickX -= lineNumberWidth
+			if clickX < 0 {
+				clickX = 0
+			}
+		}
+
+		// Find which display line was clicked (accounting for scroll offset)
+		targetDisplayLine := m.scrollOffset + clickY
+
+		// Find the actual row and column
+		currentLine := 0
+		for row, line := range m.value {
+			wrappedLines := m.memoizedWrap(line, m.width)
+			for wl := range wrappedLines {
+				if currentLine == targetDisplayLine {
+					// Found the line that was clicked
+					m.row = row
+
+					// Calculate column position within the wrapped line
+					if wl == 0 {
+						// First wrapped line - use click X directly
+						m.col = min(clickX, len(line))
+					} else {
+						// Subsequent wrapped line - need to calculate offset
+						charsBeforeWrap := 0
+						for i := 0; i < wl && i < len(wrappedLines)-1; i++ {
+							charsBeforeWrap += len(wrappedLines[i])
+						}
+						m.col = min(charsBeforeWrap+clickX, len(line))
+					}
+
+					m.lastCharOffset = 0
+					return m, nil
+				}
+				currentLine++
+			}
+		}
+
+		// If click was beyond content, position at end of last line
+		if len(m.value) > 0 {
+			m.row = len(m.value) - 1
+			m.col = len(m.value[m.row])
+		}
+
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		// Handle mouse wheel scrolling when content exceeds MaxHeight
+		slog.Debug("Textarea received mouse wheel",
+			"msg", fmt.Sprintf("%+v", msg),
+			"MaxHeight", m.MaxHeight,
+			"LineCount", m.LineCount(),
+			"scrollOffset", m.scrollOffset)
+
+		if m.MaxHeight > 0 && m.LineCount() > m.MaxHeight {
+			scrollAmount := 3 // Scroll 3 lines per wheel tick
+			oldOffset := m.scrollOffset
+
+			// In Bubble Tea v2, check the Button field for wheel direction
+			// MouseWheelUp and MouseWheelDown are the button values
+			if msg.Button == tea.MouseWheelUp {
+				// Scroll up
+				m.scrollOffset = max(0, m.scrollOffset-scrollAmount)
+			} else if msg.Button == tea.MouseWheelDown {
+				// Scroll down
+				maxScroll := max(0, m.LineCount()-m.MaxHeight)
+				m.scrollOffset = min(maxScroll, m.scrollOffset+scrollAmount)
+			}
+
+			slog.Debug("Textarea scroll update",
+				"oldOffset", oldOffset,
+				"newOffset", m.scrollOffset,
+				"button", msg.Button)
+
+			// Mark as manual scrolling to prevent cursor from forcing view
+			m.manualScrolling = true
+			m.scrollLocked = true
+
+			// Return immediately without updating cursor
+			return m, nil
+		}
+
 	case tea.KeyPressMsg:
+		// Reset manual scrolling when user types or navigates
+		m.manualScrolling = false
+		m.scrollbarActive = false
+
+		// If scroll is locked and cursor is not in viewport, move it to visible area
+		if m.scrollLocked {
+			if !m.isCursorInViewport() {
+				m.MoveCursorToVisibleLine()
+			}
+			m.scrollLocked = false
+		}
 		switch {
 		case key.Matches(msg, m.KeyMap.DeleteAfterCursor):
 			m.col = clamp(m.col, 0, len(m.value[m.row]))
@@ -1173,6 +1410,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 	cmds = append(cmds, cmd)
 
+	// Ensure cursor stays visible when content exceeds height limit
+	// But not when manually scrolling with scrollbar
+	if !m.manualScrolling {
+		m.ensureCursorVisible()
+	}
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -1194,6 +1437,8 @@ func (m Model) View() string {
 	)
 
 	displayLine := 0
+	renderedLines := 0
+
 	for l, line := range m.value {
 		wrappedLines := m.memoizedWrap(line, m.width)
 
@@ -1204,10 +1449,22 @@ func (m Model) View() string {
 		}
 
 		for wl, wrappedLine := range wrappedLines {
+			// Skip lines that are above the viewport (scrolled out of view)
+			if displayLine < m.scrollOffset {
+				displayLine++
+				continue
+			}
+
+			// Stop rendering if we've reached the height limit
+			if m.MaxHeight > 0 && renderedLines >= m.MaxHeight {
+				break
+			}
+
 			prompt := m.promptView(displayLine)
 			prompt = styles.computedPrompt().Render(prompt)
 			s.WriteString(style.Render(prompt))
 			displayLine++
+			renderedLines++
 
 			var ln string
 			if m.ShowLineNumbers {
@@ -1239,15 +1496,21 @@ func (m Model) View() string {
 				wrappedLine = []rune(strings.TrimSuffix(string(wrappedLine), " "))
 				padding -= m.width - strwidth
 			}
-			if m.row == l && lineInfo.RowOffset == wl {
+			if m.row == l && lineInfo.RowOffset == wl && !m.scrollbarActive {
 				s.WriteString(style.Render(string(wrappedLine[:lineInfo.ColumnOffset])))
 				if m.col >= len(line) && lineInfo.CharOffset >= m.width {
 					m.virtualCursor.SetChar(" ")
 					s.WriteString(m.virtualCursor.View())
-				} else {
+				} else if lineInfo.ColumnOffset < len(wrappedLine) {
 					m.virtualCursor.SetChar(string(wrappedLine[lineInfo.ColumnOffset]))
 					s.WriteString(style.Render(m.virtualCursor.View()))
-					s.WriteString(style.Render(string(wrappedLine[lineInfo.ColumnOffset+1:])))
+					if lineInfo.ColumnOffset+1 < len(wrappedLine) {
+						s.WriteString(style.Render(string(wrappedLine[lineInfo.ColumnOffset+1:])))
+					}
+				} else {
+					// Safety: cursor is beyond line length
+					m.virtualCursor.SetChar(" ")
+					s.WriteString(m.virtualCursor.View())
 				}
 			} else {
 				s.WriteString(style.Render(string(wrappedLine)))
@@ -1255,6 +1518,11 @@ func (m Model) View() string {
 			s.WriteString(style.Render(strings.Repeat(" ", max(0, padding))))
 			s.WriteRune('\n')
 			newLines++
+		}
+
+		// Break out of outer loop if we've reached height limit
+		if m.MaxHeight > 0 && renderedLines >= m.MaxHeight {
+			break
 		}
 	}
 
@@ -1464,6 +1732,30 @@ func (m Model) cursorLineNumber() int {
 	}
 	line += m.LineInfo().RowOffset
 	return line
+}
+
+// ensureCursorVisible adjusts scrollOffset to keep the cursor visible within the viewport
+func (m *Model) ensureCursorVisible() {
+	if m.MaxHeight <= 0 || m.scrollbarActive || m.scrollLocked {
+		return
+	}
+
+	cursorLine := m.cursorLineNumber()
+
+	// If cursor is above the viewport, scroll up
+	if cursorLine < m.scrollOffset {
+		m.scrollOffset = cursorLine
+	}
+
+	// If cursor is below the viewport, scroll down
+	if cursorLine >= m.scrollOffset+m.MaxHeight {
+		m.scrollOffset = cursorLine - m.MaxHeight + 1
+	}
+
+	// Ensure scroll offset doesn't go negative
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
 }
 
 // mergeLineBelow merges the current line the cursor is on with the line below.

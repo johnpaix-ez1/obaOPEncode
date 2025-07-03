@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -21,7 +22,11 @@ type Keybinding struct {
 func (k Keybinding) Matches(msg tea.KeyPressMsg, leader bool) bool {
 	key := k.Key
 	key = strings.TrimSpace(key)
-	return key == msg.String() && (k.RequiresLeader == leader)
+	match := key == msg.String() && (k.RequiresLeader == leader)
+	if strings.Contains(key, "cmd") || strings.Contains(msg.String(), "cmd") {
+		slog.Debug("Keybinding check", "key", key, "msg", msg.String(), "match", match, "leader", leader)
+	}
+	return match
 }
 
 type CommandName string
@@ -89,6 +94,8 @@ const (
 	InputClearCommand           CommandName = "input_clear"
 	InputPasteCommand           CommandName = "input_paste"
 	InputSubmitCommand          CommandName = "input_submit"
+	SelectionCopyCommand        CommandName = "selection_copy"
+	SelectionAllCommand         CommandName = "selection_all"
 	InputNewlineCommand         CommandName = "input_newline"
 	MessagesPageUpCommand       CommandName = "messages_page_up"
 	MessagesPageDownCommand     CommandName = "messages_page_down"
@@ -242,6 +249,16 @@ func LoadFromConfig(config *opencode.Config) CommandRegistry {
 			Name:        InputNewlineCommand,
 			Description: "insert newline",
 			Keybindings: parseBindings("shift+enter", "ctrl+j"),
+		},
+		{
+			Name:        SelectionCopyCommand,
+			Description: "copy selected text",
+			Keybindings: parseBindings("ctrl+shift+c", "ctrl+y"),
+		},
+		{
+			Name:        SelectionAllCommand,
+			Description: "select all text",
+			Keybindings: parseBindings("ctrl+a", "cmd+a"),
 		},
 		{
 			Name:        MessagesPageUpCommand,
