@@ -24,14 +24,7 @@ When opencode starts up, it looks for a config file in the current directory or 
 
 ## Quick Access
 
-You can quickly open your global config file for editing using the `/config` command in opencode. This will open `~/.config/opencode/config.json` in your default editor (set via the `$EDITOR` environment variable).
-
-- **Command**: `/config`
-- **Keybinding**: `<leader>o` (where leader is typically `Ctrl+X`)
-
-This is the fastest way to modify your global configuration without leaving the opencode interface.
-
-You can customize the keybinding by setting the `config` field in your keybinds configuration. See the [keybinds documentation](/docs/keybinds) for more details.
+You can quickly open and edit your opencode configuration file using the `/config` command. The command opens your project config (`opencode.json`) first, falling back to your global config (`~/.config/opencode/config.json`).
 
 ---
 
