@@ -72,6 +72,7 @@ export namespace Config {
         .describe("Leader key for keybind combinations"),
       help: z.string().optional().describe("Show help dialog"),
       editor_open: z.string().optional().describe("Open external editor"),
+      config: z.string().optional().describe("Edit configuration file"),
       session_new: z.string().optional().describe("Create a new session"),
       session_list: z.string().optional().describe("List all sessions"),
       session_share: z.string().optional().describe("Share current session"),
