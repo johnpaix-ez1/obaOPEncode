@@ -105,11 +105,11 @@ export namespace Provider {
                 typeof init.body === "string"
                   ? JSON.parse(init.body)
                   : init.body
-              if (body?.messages) {
-                isAgentCall = body.messages.some(
-                  (msg: any) =>
-                    msg.role && ["tool", "assistant"].includes(msg.role),
-                )
+              if (body?.messages && body.messages.length > 0) {
+                const lastMessage = body.messages[body.messages.length - 1]
+                isAgentCall =
+                  lastMessage.role &&
+                  ["tool", "assistant"].includes(lastMessage.role)
               }
             } catch {}
             const headers = {
