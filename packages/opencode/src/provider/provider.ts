@@ -306,6 +306,12 @@ export namespace Provider {
       if (provider.type === "api") {
         mergeProvider(providerID, { apiKey: provider.key }, "api")
       }
+      if (provider.type === "env") {
+        const envValue = process.env[provider.env]
+        if (envValue) {
+          mergeProvider(providerID, { apiKey: envValue }, "env")
+        }
+      }
     }
 
     // load custom
