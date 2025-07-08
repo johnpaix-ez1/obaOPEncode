@@ -397,6 +397,8 @@ func (r configProviderModelsLimitJSON) RawJSON() string {
 type Keybinds struct {
 	// Exit the application
 	AppExit string `json:"app_exit"`
+	// Edit configuration file
+	Config string `json:"config"`
 	// Open external editor
 	EditorOpen string `json:"editor_open"`
 	// Show help dialog
@@ -455,6 +457,7 @@ type Keybinds struct {
 // keybindsJSON contains the JSON metadata for the struct [Keybinds]
 type keybindsJSON struct {
 	AppExit              apijson.Field
+	Config               apijson.Field
 	EditorOpen           apijson.Field
 	Help                 apijson.Field
 	HistoryNext          apijson.Field
