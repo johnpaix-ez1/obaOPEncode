@@ -286,8 +286,11 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updatedEditor, cmd := a.editor.Update(msg)
 		a.editor = updatedEditor.(chat.EditorComponent)
 		return a, cmd
-	case tea.MouseWheelMsg:
-		a.lastScroll = time.Now()
+	case tea.MouseWheelMsg, tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
+		// Track scroll time for MouseWheelMsg (from dev branch)
+		if _, ok := msg.(tea.MouseWheelMsg); ok {
+			a.lastScroll = time.Now()
+		}
 		if a.modal != nil {
 			return a, nil
 		}

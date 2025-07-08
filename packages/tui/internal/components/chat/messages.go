@@ -32,17 +32,19 @@ type MessagesComponent interface {
 }
 
 type messagesComponent struct {
-	width           int
-	app             *app.App
-	viewport        viewport.Model
-	cache           *MessageCache
-	rendering       bool
-	showToolDetails bool
-	tail            bool
-	partCount       int
-	lineCount       int
-	selectedPart    int
-	selectedText    string
+	width              int
+	app                *app.App
+	viewport           viewport.Model
+	cache              *MessageCache
+	rendering          bool
+	showToolDetails    bool
+	tail               bool
+	scrollbarDragging  bool
+	scrollbarDragStart int
+	partCount          int
+	lineCount          int
+	selectedPart       int
+	selectedText       string
 }
 type renderFinishedMsg struct{}
 type selectedMessagePartChangedMsg struct {
@@ -61,6 +63,23 @@ func (m *messagesComponent) Selected() string {
 
 func (m *messagesComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Handle mouse events for scrollbar
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if m.handleScrollbarClick(msg.X, msg.Y) {
+			return m, nil
+		}
+	case tea.MouseReleaseMsg:
+		m.scrollbarDragging = false
+		return m, nil
+	case tea.MouseMotionMsg:
+		if m.scrollbarDragging {
+			m.handleScrollbarDrag(msg.Y)
+			return m, nil
+		}
+	}
+
 	switch msg := msg.(type) {
 	case app.SendMsg:
 		m.viewport.GotoBottom()
@@ -392,6 +411,145 @@ func (m *messagesComponent) header(width int) string {
 	return "\n" + header + "\n"
 }
 
+func (m *messagesComponent) renderScrollbar() string {
+	totalLines := m.viewport.TotalLineCount()
+	visibleLines := m.viewport.Height()
+	scrollOffset := m.viewport.YOffset
+
+	// Don't show scrollbar if content fits
+	if totalLines <= visibleLines {
+		return ""
+	}
+
+	// Calculate scrollbar dimensions
+	scrollbarHeight := visibleLines
+	thumbHeight := max(1, (visibleLines*scrollbarHeight)/totalLines)
+	maxThumbPos := scrollbarHeight - thumbHeight
+	thumbPos := (scrollOffset * maxThumbPos) / max(1, totalLines-visibleLines)
+
+	// Build scrollbar using proper styling
+	t := theme.CurrentTheme()
+	scrollbar := make([]string, scrollbarHeight)
+
+	// Create styles for track and thumb
+	trackStyle := styles.NewStyle().
+		Foreground(t.BackgroundElement()).
+		Background(t.Background())
+
+	thumbStyle := styles.NewStyle().
+		Foreground(t.Primary()).
+		Background(t.Background())
+
+	for i := 0; i < scrollbarHeight; i++ {
+		if i >= thumbPos && i < thumbPos+thumbHeight {
+			// Thumb part - use solid block
+			scrollbar[i] = thumbStyle.Render("█")
+		} else {
+			// Track part - use thin line
+			scrollbar[i] = trackStyle.Render("│")
+		}
+	}
+
+	return strings.Join(scrollbar, "\n")
+}
+
+func (m *messagesComponent) handleScrollbarClick(x, y int) bool {
+	// Check if click is in scrollbar area (rightmost column)
+	if x != m.width-1 {
+		return false
+	}
+
+	// Check if we have a scrollbar
+	totalLines := m.viewport.TotalLineCount()
+	visibleLines := m.viewport.Height()
+	if totalLines <= visibleLines {
+		return false
+	}
+
+	// Calculate header offset - account for the header in the layout
+	headerHeight := lipgloss.Height(m.header(m.width))
+	scrollbarY := y - headerHeight
+
+	// Check if click is within scrollbar bounds
+	if scrollbarY < 0 || scrollbarY >= visibleLines {
+		return false
+	}
+	// Calculate new scroll position based on click
+	scrollbarHeight := visibleLines
+	thumbHeight := max(1, (visibleLines*scrollbarHeight)/totalLines)
+	maxThumbPos := scrollbarHeight - thumbHeight
+
+	// Check if we clicked on the thumb
+	currentThumbPos := (m.viewport.YOffset * maxThumbPos) / max(1, totalLines-visibleLines)
+	if scrollbarY >= currentThumbPos && scrollbarY < currentThumbPos+thumbHeight {
+		// Start dragging
+		m.scrollbarDragging = true
+		m.scrollbarDragStart = scrollbarY - currentThumbPos
+		return true
+	}
+
+	// Jump to position
+	newThumbPos := scrollbarY - thumbHeight/2
+	if newThumbPos < 0 {
+		newThumbPos = 0
+	} else if newThumbPos > maxThumbPos {
+		newThumbPos = maxThumbPos
+	}
+
+	newOffset := (newThumbPos * (totalLines - visibleLines)) / max(1, maxThumbPos)
+	m.viewport.SetYOffset(newOffset)
+	m.tail = m.viewport.AtBottom()
+
+	return true
+}
+
+func (m *messagesComponent) handleScrollbarDrag(y int) {
+	totalLines := m.viewport.TotalLineCount()
+	visibleLines := m.viewport.Height()
+	if totalLines <= visibleLines {
+		return
+	}
+
+	// Calculate header offset - consistent with click handler
+	headerHeight := lipgloss.Height(m.header(m.width))
+	scrollbarY := y - headerHeight - m.scrollbarDragStart
+	// Calculate scrollbar dimensions
+	scrollbarHeight := visibleLines
+	thumbHeight := max(1, (visibleLines*scrollbarHeight)/totalLines)
+	maxThumbPos := scrollbarHeight - thumbHeight
+
+	// Clamp thumb position
+	if scrollbarY < 0 {
+		scrollbarY = 0
+	} else if scrollbarY > maxThumbPos {
+		scrollbarY = maxThumbPos
+	}
+
+	// Calculate new scroll offset
+	newOffset := (scrollbarY * (totalLines - visibleLines)) / max(1, maxThumbPos)
+	m.viewport.SetYOffset(newOffset)
+	m.tail = m.viewport.AtBottom()
+}
+
+func (m *messagesComponent) applyScrollbarOverlay(viewportContent string) string {
+	scrollbar := m.renderScrollbar()
+	if scrollbar == "" {
+		return viewportContent
+	}
+
+	// Use OpenCode's overlay system to properly place the scrollbar
+	// This ensures no interference with the viewport content
+	scrollbarX := m.width - 1 // Position at rightmost column
+	scrollbarY := 0           // Start at top of content
+
+	return layout.PlaceOverlay(
+		scrollbarX,
+		scrollbarY,
+		scrollbar,
+		viewportContent,
+	)
+}
+
 func (m *messagesComponent) View(width, height int) string {
 	t := theme.CurrentTheme()
 	if m.rendering {
@@ -404,13 +562,20 @@ func (m *messagesComponent) View(width, height int) string {
 			styles.WhitespaceStyle(t.Background()),
 		)
 	}
+
 	header := m.header(width)
 	m.viewport.SetWidth(width)
 	m.viewport.SetHeight(height - lipgloss.Height(header))
 
+	// Get the viewport content
+	content := m.viewport.View()
+
+	// Apply scrollbar overlay using OpenCode's overlay system
+	content = m.applyScrollbarOverlay(content)
+
 	return styles.NewStyle().
 		Background(t.Background()).
-		Render(header + "\n" + m.viewport.View())
+		Render(header + "\n" + content)
 }
 
 func (m *messagesComponent) SetWidth(width int) tea.Cmd {
@@ -501,7 +666,8 @@ func (m *messagesComponent) ToolDetailsVisible() bool {
 
 func NewMessagesComponent(app *app.App) MessagesComponent {
 	vp := viewport.New()
-	vp.KeyMap = viewport.KeyMap{}
+	// Keep viewport key bindings enabled for mouse scrolling
+	// vp.KeyMap = viewport.KeyMap{}
 
 	return &messagesComponent{
 		app:             app,
