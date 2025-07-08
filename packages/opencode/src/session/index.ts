@@ -1,4 +1,5 @@
 import path from "path"
+import fs from "fs/promises"
 import { Decimal } from "decimal.js"
 import { z, ZodSchema } from "zod"
 import {
@@ -35,6 +36,9 @@ import { NamedError } from "../util/error"
 import { SystemPrompt } from "./system"
 import { FileTime } from "../file/time"
 import { MessageV2 } from "./message-v2"
+import { Global } from "../global"
+
+const WEB_SERVER_PORT = 4321
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -190,6 +194,88 @@ export namespace Session {
       draft.share = undefined
     })
     await Share.remove(id, share.secret)
+  }
+
+  function getExportsDir() {
+    return path.join(Global.Path.config, "session-exports")
+  }
+
+  export async function exportLocal(id: string) {
+    const session = await get(id)
+    if (!session) throw new Error(`Session ${id} not found`)
+
+    const messages = await Session.messages(id)
+
+    // Create local shares directory in config
+    const exportsDir = getExportsDir()
+    await fs.mkdir(exportsDir, { recursive: true })
+
+    // Export session info
+    const sessionPath = path.join(exportsDir, `${id}.json`)
+    await Bun.write(
+      sessionPath,
+      JSON.stringify(
+        {
+          session,
+          messages,
+          exportedAt: Date.now(),
+        },
+        null,
+        2,
+      ),
+    )
+
+    log.info("Session exported locally", { sessionId: id, path: sessionPath })
+
+    const localUrl = `http://localhost:${WEB_SERVER_PORT}/local/${id}`
+
+    return {
+      localUrl,
+      exportPath: sessionPath,
+    }
+  }
+
+  export async function listExported() {
+    try {
+      const exportsDir = getExportsDir()
+      const files = await fs.readdir(exportsDir)
+      const exportedSessions = []
+
+      for (const file of files) {
+        if (file.endsWith(".json")) {
+          const filePath = path.join(exportsDir, file)
+          try {
+            const exportData = JSON.parse(await Bun.file(filePath).text())
+            if (exportData.session && exportData.messages) {
+              exportedSessions.push(exportData)
+            }
+          } catch (error) {
+            log.warn("Failed to parse exported session", { file, error })
+          }
+        }
+      }
+
+      return exportedSessions
+    } catch (error) {
+      // Directory doesn't exist or other error
+      return []
+    }
+  }
+
+  export async function getExported(id: string) {
+    const exportsDir = getExportsDir()
+    const filePath = path.join(exportsDir, `${id}.json`)
+
+    try {
+      const exportData = JSON.parse(await Bun.file(filePath).text())
+      if (exportData.session && exportData.messages) {
+        return exportData
+      }
+      return null
+    } catch (error) {
+      log.warn("Failed to get exported session", { id, error })
+      return null
+    }
   }
 
   export async function update(id: string, editor: (session: Info) => void) {

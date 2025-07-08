@@ -76,6 +76,7 @@ const (
 	SessionListCommand          CommandName = "session_list"
 	SessionShareCommand         CommandName = "session_share"
 	SessionUnshareCommand       CommandName = "session_unshare"
+	SessionExportCommand        CommandName = "session_export"
 	SessionInterruptCommand     CommandName = "session_interrupt"
 	SessionCompactCommand       CommandName = "session_compact"
 	ToolDetailsCommand          CommandName = "tool_details"
@@ -166,6 +167,11 @@ func LoadFromConfig(config *opencode.Config) CommandRegistry {
 			Description: "unshare session",
 			Keybindings: parseBindings("<leader>u"),
 			Trigger:     "unshare",
+		},
+		{
+			Name:        SessionExportCommand,
+			Description: "export session locally",
+			Trigger:     "export",
 		},
 		{
 			Name:        SessionInterruptCommand,

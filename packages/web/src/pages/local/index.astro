@@ -1,0 +1,86 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import SessionsList from "../../components/SessionsList.tsx";
+import { fetchExportedSessions, computeSessionData } from "../../lib/local-session-utils";
+import "../../styles/sessions.css";
+
+const localApiUrl = import.meta.env.VITE_LOCAL_API_URL || "http://localhost:4096";
+
+let sessions = [];
+let error = null;
+
+try {
+  const exportedSessionList = await fetchExportedSessions(localApiUrl);
+  
+  const exportedSessionsWithData = exportedSessionList.map((exportData: any) => {
+    const session = exportData.session || exportData;
+    const messages = exportData.messages || [];
+    const computedData = computeSessionData(session, messages);
+    return { 
+      ...session, 
+      computedData,
+      exportedAt: exportData.exportedAt
+    };
+  });
+  
+  sessions = exportedSessionsWithData.sort((a: any, b: any) => b.time.updated - a.time.updated);
+} catch (e) {
+  error = e.message;
+}
+
+let storageLocation = 'config directory';
+try {
+  if (sessions.length > 0 && sessions[0].share?.url) {
+    const shareUrl = sessions[0].share.url;
+    if (shareUrl.startsWith('file://')) {
+      const filePath = shareUrl.replace('file://', '');
+      const configDir = filePath.substring(0, filePath.lastIndexOf('/'));
+      storageLocation = configDir;
+    }
+  }
+} catch (e) {
+  // Use default if we can't determine the path
+}
+
+const helpText = `
+<ol>
+  <li>Start opencode server: <code>opencode serve</code></li>
+  <li>Run opencode in another terminal to create sessions</li>
+  <li>Use <code>/export</code> command to export sessions for permanent local storage</li>
+  <li>View sessions here without sharing them remotely</li>
+</ol>
+<p><strong>Storage Location:</strong> Exported sessions are stored in: <code>${storageLocation}</code></p>
+<p><strong>Note:</strong> These sessions are stored permanently in your local config directory.</p>
+`;
+
+---
+<StarlightPage
+  hasSidebar={false}
+  frontmatter={{
+    title: "Exported Sessions",
+    pagefind: false,
+    template: "splash",
+    tableOfContents: false,
+    head: [
+      {
+        tag: "meta",
+        attrs: {
+          name: "description",
+          content: "opencode - Local Session Browser",
+        },
+      },
+    ],
+  }}
+>
+  <SessionsList
+    sessions={sessions}
+    title="Exported Sessions"
+    emptyMessage="No exported sessions found. Use /export command in opencode to export sessions here."
+    helpText={helpText}
+    error={error}
+    apiUrl={localApiUrl}
+    basePath="/local"
+    client:only="solid"
+  />
+</StarlightPage>
+

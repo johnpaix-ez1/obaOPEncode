@@ -1,0 +1,93 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import Share from "../../components/Share.tsx";
+import { fetchExportedSessions, fetchSessionMessages } from "../../lib/local-session-utils";
+import type { Session } from "@opencode/opencode/session";
+import type { Message } from "@opencode/opencode/session/message";
+
+interface ExportedSession {
+  session: Session.Info;
+  messages: Message.Info[];
+  exportedAt: number;
+}
+
+const localApiUrl = import.meta.env.VITE_LOCAL_API_URL || "http://localhost:4096";
+const { sessionId } = Astro.params;
+
+let sessionInfo;
+let messages;
+let error = null;
+
+try {
+  const sessions = await fetchExportedSessions(localApiUrl);
+
+  // Find session from exported sessions structure
+  const exportedSession = sessions.find((exportData: ExportedSession) => 
+    exportData.session.id === sessionId
+  );
+  
+  sessionInfo = exportedSession?.session;
+  messages = exportedSession?.messages;
+
+  if (!sessionInfo) {
+    return new Response(null, {
+      status: 404,
+      statusText: 'Exported session not found'
+    });
+  }
+} catch (e) {
+  error = e.message;
+}
+
+if (error) {
+  return new Response(null, {
+    status: 500,
+    statusText: error
+  });
+}
+
+const messagesObj = {};
+messages.forEach((msg: any) => {
+  messagesObj[msg.id] = msg;
+});
+
+---
+<StarlightPage
+  hasSidebar={false}
+  frontmatter={{
+    title: sessionInfo.title,
+    pagefind: false,
+    template: "splash",
+    tableOfContents: false,
+    head: [
+      {
+        tag: "meta",
+        attrs: {
+          name: "description",
+          content: "opencode - Exported Session Viewer",
+        },
+      },
+    ],
+  }}
+>
+  <Share
+    id={sessionId}
+    api={localApiUrl}
+    info={sessionInfo}
+    messages={messagesObj}
+    client:only="solid"
+  />
+</StarlightPage>
+
+<style is:global>
+body > .page > .main-frame .main-pane > main > .content-panel:first-of-type {
+  display: none;
+}
+body > .page > .main-frame .main-pane > main {
+  padding: 0;
+}
+body > .page > .main-frame .main-pane > main > .content-panel + .content-panel {
+  border-top: none !important;
+  padding: 0;
+}
+</style>

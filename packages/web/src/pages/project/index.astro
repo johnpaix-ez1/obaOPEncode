@@ -1,0 +1,81 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro"
+import SessionsList from "../../components/SessionsList.tsx"
+import {
+  fetchProjectSessions,
+  computeSessionData,
+  fetchSessionMessages,
+} from "../../lib/local-session-utils"
+import "../../styles/sessions.css"
+
+const localApiUrl =
+  import.meta.env.VITE_LOCAL_API_URL || "http://localhost:4096"
+
+let sessions = []
+let error = null
+
+try {
+  const sessionList = await fetchProjectSessions(localApiUrl)
+
+  const sessionsWithData = await Promise.all(
+    sessionList.map(async (session: any) => {
+      // Fetch messages for each session to compute real token data
+      const messages = await fetchSessionMessages(localApiUrl, session.id)
+      const computedData = computeSessionData(session, messages)
+
+      return {
+        ...session,
+        computedData,
+      }
+    })
+  )
+
+  sessions = sessionsWithData.sort(
+    (a: any, b: any) => b.time.updated - a.time.updated
+  )
+} catch (e) {
+  error = e.message
+}
+
+const helpText = `
+<ol>
+  <li>Start opencode server: <code>opencode serve</code></li>
+  <li>Run opencode in another terminal to create sessions</li>
+  <li>Active project sessions appear here</li>
+  <li>Use <code>/export</code> command to move sessions to permanent local storage</li>
+</ol>
+<p><strong>Note:</strong> These are active project sessions that may be cleaned up over time.</p>
+`
+---
+
+<StarlightPage
+  hasSidebar={false}
+  frontmatter={{
+    title: "Project Sessions",
+    pagefind: false,
+    template: "splash",
+    tableOfContents: false,
+    head: [
+      {
+        tag: "meta",
+        attrs: {
+          name: "description",
+          content: "opencode - Project Session Browser",
+        },
+      },
+    ],
+  }}
+>
+  <SessionsList
+    sessions={sessions}
+    title="Project Sessions"
+    emptyMessage="No active project sessions found. Start opencode to create sessions."
+    helpText={helpText}
+    error={error}
+    apiUrl={localApiUrl}
+    basePath="/project"
+    client:only="solid"
+  />
+</StarlightPage>
+
+

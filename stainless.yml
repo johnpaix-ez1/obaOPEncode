@@ -87,6 +87,9 @@ resources:
       assistantMessagePart: AssistantMessagePart
       userMessage: UserMessage
       userMessagePart: UserMessagePart
+      exportResult: ExportResult
+      exportedSession: ExportedSession
+      exportedSessionInfo: ExportedSessionInfo
       toolStatePending: ToolStatePending
       toolStateRunning: ToolStateRunning
       toolStateCompleted: ToolStateCompleted
@@ -103,6 +106,9 @@ resources:
       summarize: post /session/{id}/summarize
       messages: get /session/{id}/message
       chat: post /session/{id}/message
+      export: post /session/{id}/export
+      listExported: get /session/export
+      getExported: get /session/{id}/export
 
 settings:
   disable_mock_tests: true
