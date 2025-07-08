@@ -54,6 +54,7 @@ export namespace SystemPrompt {
   const CUSTOM_FILES = [
     "AGENTS.md",
     "CLAUDE.md",
+    path.join(".github", "copilot-instructions.md"),
     "CONTEXT.md", // deprecated
   ]
 
