@@ -18,6 +18,7 @@ import { WriteTool } from "../tool/write"
 import { TodoReadTool, TodoWriteTool } from "../tool/todo"
 import { AuthAnthropic } from "../auth/anthropic"
 import { AuthCopilot } from "../auth/copilot"
+import { AuthGoogle } from "../auth/google"
 import { ModelsDev } from "./models"
 import { NamedError } from "../util/error"
 import { Auth } from "../auth"
@@ -116,6 +117,158 @@ export namespace Provider {
             return fetch(input, {
               ...init,
               headers,
+            })
+          },
+        },
+      }
+    },
+    google: async (provider) => {
+      const access = await AuthGoogle.access()
+      if (!access) return { autoload: false }
+
+      // Set cost to 0 for OAuth users (free tier)
+      if (provider && provider.models) {
+        for (const model of Object.values(provider.models)) {
+          model.cost = {
+            input: 0,
+            output: 0,
+          }
+        }
+      }
+
+      // Discover project ID on initialization
+      let projectId: string | null = null
+      try {
+        projectId = await AuthGoogle.discoverProjectId()
+      } catch (error: any) {
+        console.error("Failed to discover Google Cloud project ID")
+        // Don't fail initialization completely - we'll try again on each request
+        if (error.message?.includes("Permission denied")) {
+          console.error("You may need to set GOOGLE_CLOUD_PROJECT environment variable")
+        }
+      }
+
+      return {
+        autoload: true,
+        options: {
+          apiKey: "",
+          baseURL: "https://cloudcode-pa.googleapis.com/v1internal",
+          async fetch(_input: any, init: any) {
+            const access = await AuthGoogle.access()
+            if (!access) throw new Error("Not authenticated with Google")
+
+            // Use discovered project ID or try to discover it
+            if (!projectId) {
+              try {
+                projectId = await AuthGoogle.discoverProjectId()
+              } catch (error: any) {
+                console.error("Failed to discover project ID during request:", error.message)
+                // Return a proper error response instead of continuing with invalid project
+                return new Response(JSON.stringify({
+                  error: "Google Cloud project configuration error",
+                  details: "Could not discover or access Google Cloud project. Please set GOOGLE_CLOUD_PROJECT environment variable or ensure you have a valid Google Cloud project.",
+                  message: error.message
+                }), {
+                  status: 403,
+                  headers: { "Content-Type": "application/json" }
+                })
+              }
+            }
+
+            // Parse the request body
+            let body = init.body
+            if (body && typeof body === "string") {
+              try {
+                const parsed = JSON.parse(body)
+                
+                // Transform to Code Assist format
+                const transformedBody = {
+                  model: parsed.model || "gemini-2.0-flash",
+                  project: projectId,
+                  request: {
+                    contents:
+                      parsed.contents ||
+                      parsed.messages?.map((msg: any) => ({
+                        role: msg.role === "assistant" ? "model" : msg.role,
+                        parts: [
+                          { text: msg.content || msg.parts?.[0]?.text },
+                        ],
+                      })),
+                    generationConfig: {
+                      temperature: parsed.temperature || 0.7,
+                      maxOutputTokens: parsed.max_tokens || 8192,
+                      ...parsed.generationConfig,
+                    },
+                  },
+                }
+                
+                // Check if this is a streaming request
+                const isStreaming = parsed.stream === true
+                
+                // Make request to Code Assist API
+                const endpoint = isStreaming ? ":streamGenerateContent?alt=sse" : ":generateContent"
+                const response = await fetch(
+                  `https://cloudcode-pa.googleapis.com/v1internal${endpoint}`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${access}`,
+                    },
+                    body: JSON.stringify(transformedBody),
+                  }
+                )
+
+                // For non-streaming responses, transform back to expected format
+                if (!isStreaming && response.ok) {
+                  const data = await response.json()
+                  if (data.candidates) {
+                    // Transform Code Assist response to standard format
+                    const transformed = {
+                      choices: data.candidates.map((candidate: any) => ({
+                        message: {
+                          role: "assistant",
+                          content: candidate.content?.parts?.[0]?.text || "",
+                        },
+                        finish_reason:
+                          candidate.finishReason === "STOP" ? "stop" : "length",
+                      })),
+                      usage: data.usageMetadata
+                        ? {
+                            prompt_tokens: data.usageMetadata.promptTokenCount || 0,
+                            completion_tokens:
+                              data.usageMetadata.candidatesTokenCount || 0,
+                            total_tokens: data.usageMetadata.totalTokenCount || 0,
+                          }
+                        : undefined,
+                    }
+                    return new Response(JSON.stringify(transformed), {
+                      status: response.status,
+                      headers: response.headers,
+                    })
+                  }
+                }
+
+                return response
+              } catch (e) {
+                console.error("Failed to parse or transform request:", e)
+                // If we can't parse/transform, return an error response
+                return new Response(JSON.stringify({
+                  error: "Failed to process request",
+                  details: e instanceof Error ? e.message : String(e)
+                }), {
+                  status: 400,
+                  headers: { "Content-Type": "application/json" }
+                })
+              }
+            }
+
+            // If no body or can't parse, return error
+            return new Response(JSON.stringify({
+              error: "Invalid request body"
+            }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" }
             })
           },
         },
