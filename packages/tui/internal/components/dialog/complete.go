@@ -67,6 +67,12 @@ type CompletionSelectedMsg struct {
 	ProviderID      string
 }
 
+type CompletionFilledMsg struct {
+	SearchString    string
+	CompletionValue string
+	IsCommand       bool
+}
+
 type CompletionDialogCompleteItemMsg struct {
 	Value string
 }
@@ -91,12 +97,16 @@ type completionDialogComponent struct {
 
 type completionDialogKeyMap struct {
 	Complete key.Binding
+	Fill     key.Binding
 	Cancel   key.Binding
 }
 
 var completionDialogKeys = completionDialogKeyMap{
 	Complete: key.NewBinding(
-		key.WithKeys("tab", "enter", "right"),
+		key.WithKeys("enter", "right"),
+	),
+	Fill: key.NewBinding(
+		key.WithKeys("tab"),
 	),
 	Cancel: key.NewBinding(
 		key.WithKeys(" ", "esc", "backspace", "ctrl+c"),
@@ -146,6 +156,12 @@ func (c *completionDialogComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return c, nil
 				}
 				return c, c.complete(item)
+			case key.Matches(msg, completionDialogKeys.Fill):
+				item, i := c.list.GetSelectedItem()
+				if i == -1 {
+					return c, nil
+				}
+				return c, c.fill(item)
 			case key.Matches(msg, completionDialogKeys.Cancel):
 				// Only close on backspace when there are no characters left
 				if msg.String() != "backspace" || len(c.pseudoSearchTextArea.Value()) <= 0 {
@@ -216,6 +232,25 @@ func (c *completionDialogComponent) complete(item CompletionItemI) tea.Cmd {
 			SearchString:    value,
 			CompletionValue: item.GetValue(),
 			ProviderID:      c.completionProvider.GetId(),
+		}),
+		c.close(),
+	)
+}
+
+func (c *completionDialogComponent) fill(item CompletionItemI) tea.Cmd {
+	value := c.pseudoSearchTextArea.Value()
+	if value == "" {
+		return nil
+	}
+
+	// Check if this is a command completion
+	isCommand := c.completionProvider.GetId() == "commands"
+
+	return tea.Batch(
+		util.CmdHandler(CompletionFilledMsg{
+			SearchString:    value,
+			CompletionValue: item.GetValue(),
+			IsCommand:       isCommand,
 		}),
 		c.close(),
 	)

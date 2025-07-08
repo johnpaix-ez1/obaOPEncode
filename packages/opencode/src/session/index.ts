@@ -25,6 +25,7 @@ import { Installation } from "../installation"
 import { MCP } from "../mcp"
 import { Provider } from "../provider/provider"
 import { ProviderTransform } from "../provider/transform"
+import { FileReference } from "../util/file-reference"
 import type { ModelsDev } from "../provider/models"
 import { Share } from "../share/share"
 import { Snapshot } from "../snapshot"
@@ -337,6 +338,20 @@ export namespace Session {
     const lastSummary = msgs.findLast((msg) => msg.role === "assistant" && msg.summary === true)
     if (lastSummary) msgs = msgs.filter((msg) => msg.id >= lastSummary.id)
 
+    // Process file references in text parts
+    const processedParts = await Promise.all(
+      input.parts.map(async (part) => {
+        if (part.type === "text") {
+          const { processedText } = await FileReference.resolve(part.text)
+          return {
+            ...part,
+            text: processedText,
+          }
+        }
+        return part
+      }),
+    )
+
     const app = App.info()
     input.parts = await Promise.all(
       input.parts.map(async (part): Promise<MessageV2.UserPart[]> => {
@@ -385,6 +400,7 @@ export namespace Session {
         return [part]
       }),
     ).then((x) => x.flat())
+
     if (msgs.length === 0 && !session.parentID) {
       generateText({
         maxOutputTokens: input.providerID === "google" ? 1024 : 20,
@@ -418,15 +434,17 @@ export namespace Session {
         })
         .catch(() => {})
     }
+
     const msg: MessageV2.Info = {
       id: Identifier.ascending("message"),
       role: "user",
       sessionID: input.sessionID,
-      parts: input.parts,
+      parts: processedParts,
       time: {
         created: Date.now(),
       },
     }
+
     await updateMessage(msg)
     msgs.push(msg)
 

@@ -1,7 +1,12 @@
 package completions
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss/v2"
@@ -12,6 +17,13 @@ import (
 	"github.com/sst/opencode/internal/styles"
 	"github.com/sst/opencode/internal/theme"
 )
+
+type CustomCommandFile struct {
+	Name        string `json:"name"`
+	Filename    string `json:"filename"`
+	Content     string `json:"content"`
+	Description string `json:"description"`
+}
 
 type CommandCompletionProvider struct {
 	app *app.App
@@ -39,29 +51,98 @@ func getCommandCompletionItem(cmd commands.Command, space int, t theme.Theme) di
 	})
 }
 
+func getCustomCommandCompletionItem(cmd CustomCommandFile, space int, t theme.Theme) dialog.CompletionItemI {
+	spacer := strings.Repeat(" ", space)
+	description := cmd.Description
+	if description == "" {
+		description = "custom command"
+	}
+	title := "  /" + cmd.Name + styles.NewStyle().Foreground(t.TextMuted()).Render(spacer+description)
+	value := "/" + cmd.Name
+	return dialog.NewCompletionItem(dialog.CompletionItem{
+		Title: title,
+		Value: value,
+	})
+}
+
+func (c *CommandCompletionProvider) getCustomCommands() ([]CustomCommandFile, error) {
+	// Get commands from server endpoint
+	ctx := context.Background()
+	serverCommands, err := c.app.CommandsClient.ListCustomCommands(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commands from server: %w", err)
+	}
+
+	slog.Debug("Server commands:" + strconv.Itoa(len(serverCommands)))
+
+	// Convert server commands to local format
+	var commands []CustomCommandFile
+	for _, cmd := range serverCommands {
+		description := ""
+		if cmd.Description != nil {
+			description = *cmd.Description
+		}
+		commands = append(commands, CustomCommandFile{
+			Name:        cmd.Name,
+			Description: description,
+			Filename:    filepath.Base(cmd.FilePath),
+			Content:     cmd.Content,
+		})
+	}
+
+	// Sort commands alphabetically
+	sort.Slice(commands, func(i, j int) bool {
+		return commands[i].Name < commands[j].Name
+	})
+
+	return commands, nil
+}
+
 func (c *CommandCompletionProvider) GetChildEntries(query string) ([]dialog.CompletionItemI, error) {
 	t := theme.CurrentTheme()
 	commands := c.app.Commands
 
+	// Get custom commands
+	customCommands, err := c.getCustomCommands()
+	if err != nil {
+		// If server is not available, return only built-in commands
+		customCommands = []CustomCommandFile{}
+	}
+
+	// Calculate spacing for alignment
 	space := 1
 	for _, cmd := range c.app.Commands {
 		if lipgloss.Width(cmd.Trigger) > space {
 			space = lipgloss.Width(cmd.Trigger)
 		}
 	}
+	for _, cmd := range customCommands {
+		if lipgloss.Width(cmd.Name) > space {
+			space = lipgloss.Width(cmd.Name)
+		}
+	}
 	space += 2
 
 	sorted := commands.Sorted()
 	if query == "" {
-		// If no query, return all commands
+		// If no query, return all commands (built-in + custom)
 		items := []dialog.CompletionItemI{}
+
+		// Add built-in commands
 		for _, cmd := range sorted {
 			if cmd.Trigger == "" {
 				continue
 			}
-			space := space - lipgloss.Width(cmd.Trigger)
-			items = append(items, getCommandCompletionItem(cmd, space, t))
+			cmdSpace := space - lipgloss.Width(cmd.Trigger)
+			items = append(items, getCommandCompletionItem(cmd, cmdSpace, t))
 		}
+
+		// Add custom commands
+		for _, cmd := range customCommands {
+			cmdSpace := space - lipgloss.Width(cmd.Name)
+			items = append(items, getCustomCommandCompletionItem(cmd, cmdSpace, t))
+		}
+
 		return items, nil
 	}
 
@@ -69,13 +150,21 @@ func (c *CommandCompletionProvider) GetChildEntries(query string) ([]dialog.Comp
 	var commandNames []string
 	commandMap := make(map[string]dialog.CompletionItemI)
 
+	// Add built-in commands
 	for _, cmd := range sorted {
 		if cmd.Trigger == "" {
 			continue
 		}
-		space := space - lipgloss.Width(cmd.Trigger)
+		cmdSpace := space - lipgloss.Width(cmd.Trigger)
 		commandNames = append(commandNames, cmd.Trigger)
-		commandMap[cmd.Trigger] = getCommandCompletionItem(cmd, space, t)
+		commandMap[cmd.Trigger] = getCommandCompletionItem(cmd, cmdSpace, t)
+	}
+
+	// Add custom commands
+	for _, cmd := range customCommands {
+		cmdSpace := space - lipgloss.Width(cmd.Name)
+		commandNames = append(commandNames, cmd.Name)
+		commandMap[cmd.Name] = getCustomCommandCompletionItem(cmd, cmdSpace, t)
 	}
 
 	// Find fuzzy matches

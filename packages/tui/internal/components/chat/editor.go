@@ -21,6 +21,11 @@ import (
 	"github.com/sst/opencode/internal/util"
 )
 
+type CustomCommandExecuteMsg struct {
+	Name      string
+	Arguments string
+}
+
 type EditorComponent interface {
 	tea.Model
 	View(width int) string
@@ -71,6 +76,17 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.ProviderID {
 		case "commands":
 			commandName := strings.TrimPrefix(msg.CompletionValue, "/")
+
+			// Check if this is a valid custom command (not a built-in command)
+			if !commands.IsBuiltinCommand(commandName) && commands.IsValidCustomCommandWithClient(commandName, m.app.Info.Path.Config, m.app.CommandsClient) {
+				customCommandName := commandName
+				updated, cmd := m.Clear()
+				m = updated.(*editorComponent)
+				cmds = append(cmds, cmd)
+				cmds = append(cmds, util.CmdHandler(CustomCommandExecuteMsg{Name: customCommandName, Arguments: ""}))
+				return m, tea.Batch(cmds...)
+			}
+
 			updated, cmd := m.Clear()
 			m = updated.(*editorComponent)
 			cmds = append(cmds, cmd)
@@ -125,6 +141,24 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+	case dialog.CompletionFilledMsg:
+		// For fill (tab), just update the input text without executing
+		existingValue := m.textarea.Value()
+
+		if msg.IsCommand {
+			// For commands, replace the search string with the command value
+			m.textarea.SetValue(msg.CompletionValue + " ")
+		} else {
+			// Replace the current token (after last space)
+			lastSpaceIndex := strings.LastIndex(existingValue, " ")
+			if lastSpaceIndex == -1 {
+				m.textarea.SetValue(msg.CompletionValue + " ")
+			} else {
+				modifiedValue := existingValue[:lastSpaceIndex+1] + msg.CompletionValue
+				m.textarea.SetValue(modifiedValue + " ")
+			}
+		}
+		return m, nil
 	}
 
 	m.spinner, cmd = m.spinner.Update(msg)

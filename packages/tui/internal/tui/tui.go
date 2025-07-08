@@ -40,8 +40,10 @@ const (
 	InterruptKeyFirstPress
 )
 
-const interruptDebounceTimeout = 1 * time.Second
-const fileViewerFullWidthCutoff = 160
+const (
+	interruptDebounceTimeout  = 1 * time.Second
+	fileViewerFullWidthCutoff = 160
+)
 
 type appModel struct {
 	width, height        int
@@ -339,6 +341,9 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commands.ExecuteCommandMsg:
 		updated, cmd := a.executeCommand(commands.Command(msg))
 		return updated, cmd
+	case chat.CustomCommandExecuteMsg:
+		updated, cmd := a.executeCustomCommandWithArgs(msg.Name, msg.Arguments)
+		return updated, cmd
 	case commands.ExecuteCommandsMsg:
 		for _, command := range msg {
 			updated, cmd := a.executeCommand(command)
@@ -350,6 +355,16 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, toast.NewErrorToast(msg.Error())
 	case app.SendMsg:
 		a.showCompletionDialog = false
+
+		// Check if the message is a custom command with arguments
+		if strings.HasPrefix(msg.Text, "/") {
+			if commandName, arguments, isCustomCommand := a.parseCustomCommand(msg.Text); isCustomCommand {
+				// Execute custom command with arguments
+				updated, cmd := a.executeCustomCommandWithArgs(commandName, arguments)
+				return updated, cmd
+			}
+		}
+
 		a.app, cmd = a.app.SendChatMessage(context.Background(), msg.Text, msg.Attachments)
 		cmds = append(cmds, cmd)
 	case dialog.CompletionDialogCloseMsg:
@@ -985,6 +1000,62 @@ func (a appModel) executeCommand(command commands.Command) (tea.Model, tea.Cmd) 
 		return a, tea.Quit
 	}
 	return a, tea.Batch(cmds...)
+}
+
+// parseCustomCommand checks if the input is a custom command and extracts name and arguments
+func (a appModel) parseCustomCommand(input string) (commandName, arguments string, isCustomCommand bool) {
+	if !strings.HasPrefix(input, "/") {
+		return "", "", false
+	}
+
+	// Remove the leading slash
+	input = strings.TrimPrefix(input, "/")
+
+	// Split by first space to separate command from arguments
+	parts := strings.SplitN(input, " ", 2)
+	commandName = parts[0]
+
+	if len(parts) > 1 {
+		arguments = parts[1]
+	}
+
+	// Check if this command exists as a custom command via server
+	ctx := context.Background()
+	exists, err := a.app.CommandsClient.CustomCommandExists(ctx, commandName)
+	if err != nil {
+		return "", "", false
+	}
+
+	if exists {
+		return commandName, arguments, true
+	}
+
+	return "", "", false
+}
+
+// executeCustomCommandWithArgs executes a custom command with arguments
+func (a appModel) executeCustomCommandWithArgs(commandName, arguments string) (tea.Model, tea.Cmd) {
+	slog.Debug("Executing custom command with arguments", "command", commandName, "arguments", arguments)
+
+	// Execute command via server endpoint
+	ctx := context.Background()
+	var args *string
+	if arguments != "" {
+		args = &arguments
+	}
+
+	var cmd tea.Cmd
+	result, err := a.app.CommandsClient.ExecuteCustomCommand(ctx, commandName, args)
+	if err == nil {
+		// Server execution successful
+		slog.Info("Custom command executed via server", "command", commandName)
+		a.app, cmd = a.app.SendChatMessage(context.Background(), result.ProcessedContent, []opencode.FilePartParam{})
+		return a, cmd
+	}
+
+	// Server execution failed
+	slog.Error("Failed to execute custom command via server", "command", commandName, "error", err)
+	return a, toast.NewErrorToast("Failed to execute custom command: " + commandName)
 }
 
 func NewModel(app *app.App) tea.Model {

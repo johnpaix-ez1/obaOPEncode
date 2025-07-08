@@ -3,12 +3,12 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"log/slog"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/sst/opencode-sdk-go"
@@ -21,31 +21,36 @@ import (
 )
 
 type App struct {
-	Info      opencode.App
-	Version   string
-	StatePath string
-	Config    *opencode.Config
-	Client    *opencode.Client
-	State     *config.State
-	Provider  *opencode.Provider
-	Model     *opencode.Model
-	Session   *opencode.Session
-	Messages  []opencode.MessageUnion
-	Commands  commands.CommandRegistry
+	Info           opencode.App
+	Version        string
+	StatePath      string
+	Config         *opencode.Config
+	Client         *opencode.Client
+	CommandsClient *commands.CommandsClient
+	State          *config.State
+	Provider       *opencode.Provider
+	Model          *opencode.Model
+	Session        *opencode.Session
+	Messages       []opencode.Message
+	Commands       commands.CommandRegistry
 }
 
-type SessionSelectedMsg = *opencode.Session
-type SessionLoadedMsg struct{}
-type ModelSelectedMsg struct {
-	Provider opencode.Provider
-	Model    opencode.Model
-}
-type SessionClearedMsg struct{}
-type CompactSessionMsg struct{}
-type SendMsg struct {
-	Text        string
-	Attachments []opencode.FilePartParam
-}
+type (
+	SessionSelectedMsg = *opencode.Session
+	SessionLoadedMsg   struct{}
+	ModelSelectedMsg   struct {
+		Provider opencode.Provider
+		Model    opencode.Model
+	}
+)
+type (
+	SessionClearedMsg struct{}
+	CompactSessionMsg struct{}
+	SendMsg           struct {
+		Text        string
+		Attachments []opencode.FilePartParam
+	}
+)
 type OptimisticMessageAddedMsg struct {
 	Message opencode.MessageUnion
 }
@@ -108,17 +113,28 @@ func New(
 
 	slog.Debug("Loaded config", "config", configInfo)
 
-	app := &App{
-		Info:      appInfo,
-		Version:   version,
-		StatePath: appStatePath,
-		Config:    configInfo,
-		State:     appState,
-		Client:    httpClient,
-		Session:   &opencode.Session{},
-		Messages:  []opencode.MessageUnion{},
-		Commands:  commands.LoadFromConfig(configInfo),
+	// Create commands client using the same base URL as the HTTP client
+	baseURL := os.Getenv("OPENCODE_SERVER")
+	if baseURL == "" {
+		baseURL = "http://localhost:4096" // Default fallback
 	}
+	commandsClient := commands.NewCommandsClient(baseURL)
+
+	app := &App{
+		Info:           appInfo,
+		Version:        version,
+		StatePath:      appStatePath,
+		Config:         configInfo,
+		State:          appState,
+		Client:         httpClient,
+		CommandsClient: commandsClient,
+		Session:        &opencode.Session{},
+		Messages:       []opencode.Message{},
+		Commands:       commands.LoadFromConfig(configInfo),
+	}
+
+	// Create example command file if commands directory doesn't exist
+	app.ensureCommandsDirectory()
 
 	return app, nil
 }
@@ -433,3 +449,89 @@ func (a *App) ListProviders(ctx context.Context) ([]opencode.Provider, error) {
 // func (a *App) loadCustomKeybinds() {
 //
 // }
+
+func (a *App) ensureCommandsDirectory() {
+	commandsDir := filepath.Join(a.Info.Path.Config, "commands")
+
+	// Check if commands directory exists
+	if _, err := os.Stat(commandsDir); os.IsNotExist(err) {
+		// Create the commands directory
+		if err := os.MkdirAll(commandsDir, 0755); err != nil {
+			slog.Error("Failed to create commands directory", "error", err)
+			return
+		}
+
+		// Create an example command file
+		examplePath := filepath.Join(commandsDir, "example.md")
+		exampleContent := `---
+description: An example custom command for demonstration
+---
+
+# Example Command
+
+This is an example command file. You can create markdown files in the commands directory to define custom commands.
+
+User request: $ARGUMENTS
+
+Please help the user with their request above. If no specific request was provided, give general guidance about this example command.
+
+## Command Locations
+
+Commands can be stored in two locations:
+1. Global: ~/.config/opencode/commands/ (available in all projects)
+2. Project: $PWD/.opencode/commands/ (specific to current project)
+
+Project-level commands take precedence over global commands with the same name.
+
+## Nested Commands
+
+You can organize commands in subdirectories. For example:
+- commands/git/commit.md becomes /git:commit
+- commands/docker/build.md becomes /docker:build
+
+## Metadata
+
+You can add YAML frontmatter at the top of your markdown files to provide metadata:
+- description: A brief description that will appear in command autocompletion
+
+Alternatively, if no frontmatter is provided, the first heading will be used as the description.
+
+## Usage
+
+When you type /example in the chat, this content will be sent to the LLM as context.
+
+## Arguments
+
+You can pass arguments to commands using the $ARGUMENTS placeholder:
+
+Example usage:
+- /example hello world
+- /example "some text with spaces"
+
+The $ARGUMENTS placeholder will be replaced with everything after the command name.
+
+## Features
+
+- Use markdown formatting
+- Include code examples
+- Add instructions for the LLM
+- Create reusable prompts
+
+## Example Code
+
+` + "```typescript" + `
+function example() {
+  console.log("This is an example");
+}
+` + "```" + `
+
+You can customize this file or create new ones with different names.
+`
+
+		if err := os.WriteFile(examplePath, []byte(exampleContent), 0644); err != nil {
+			slog.Error("Failed to create example command file", "error", err)
+		} else {
+			slog.Info("Created example command file at", "path", examplePath)
+		}
+	}
+}
