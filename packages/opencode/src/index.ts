@@ -7,6 +7,7 @@ import { Log } from "./util/log"
 import { AuthCommand } from "./cli/cmd/auth"
 import { UpgradeCommand } from "./cli/cmd/upgrade"
 import { ModelsCommand } from "./cli/cmd/models"
+import { McpCommand } from "./cli/cmd/mcp"
 import { UI } from "./cli/ui"
 import { Installation } from "./installation"
 import { NamedError } from "./util/error"
@@ -54,6 +55,7 @@ const cli = yargs(hideBin(process.argv))
   .command(UpgradeCommand)
   .command(ServeCommand)
   .command(ModelsCommand)
+  .command(McpCommand)
   .fail((msg) => {
     if (msg.startsWith("Unknown argument") || msg.startsWith("Not enough non-option arguments")) {
       cli.showHelp("log")
