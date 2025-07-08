@@ -492,7 +492,7 @@ export namespace Session {
       })
     }
 
-    for (const [key, item] of Object.entries(await MCP.tools())) {
+    for (const [key, item] of Object.entries(await MCP.tools(input.providerID))) {
       const execute = item.execute
       if (!execute) continue
       item.execute = async (args, opts) => {
